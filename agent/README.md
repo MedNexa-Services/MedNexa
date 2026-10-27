@@ -32,14 +32,19 @@ caller (`--phone`, `--hospital-id` to override, `-v` to log routing and tools). 
 ```python
 from agent import MedNexaAgent
 
-agent = MedNexaAgent(caller_phone, hospital_id)   # caller ID from telephony
+agent = MedNexaAgent(caller_phone, hospital_id)  # caller ID from telephony
 greeting = await agent.get_greeting()
-reply = await agent.process(text, language)        # language from STT ("en"/"hi")
+reply = await agent.process(text, language)  # language from STT ("en"/"hi")
 summary = await agent.get_summary()
 
 # When ending the call session:
-await api.end_call(session_id, outcome=agent.call_outcome, summary=summary,
-                   escalated_to_human=agent.escalated, language_detected=agent.language)
+await api.end_call(
+    session_id,
+    outcome=agent.call_outcome,
+    summary=summary,
+    escalated_to_human=agent.escalated,
+    language_detected=agent.language,
+)
 ```
 
 - `call_outcome` is a backend `CallOutcome` value (`BOOKED`, `CANCELLED`,
