@@ -1,8 +1,13 @@
+from datetime import timedelta
+
 from tests.api.helpers import create_doctor, create_hospital
 from tests.factories import next_weekday
 
-MONDAY = next_weekday(1, weeks_ahead=2).isoformat()
-TUESDAY = next_weekday(2, weeks_ahead=2).isoformat()
+_MONDAY = next_weekday(1, weeks_ahead=2)
+MONDAY = _MONDAY.isoformat()
+# Derived from MONDAY so it is always the following day (computing it separately
+# put it before MONDAY when the tests ran on a Tuesday).
+TUESDAY = (_MONDAY + timedelta(days=1)).isoformat()
 
 
 async def _book(client, doctor_id: str, at: str, name: str = "Rahul Kumar", **kw):
