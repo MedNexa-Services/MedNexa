@@ -219,8 +219,10 @@ class TestUtteranceBuffering:
         mock_tts: MagicMock,
         mock_api: MagicMock,
         mock_recorder: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Chunks without a VAD event mid-speech are kept; multi-frame chunks aren't doubled."""
+        monkeypatch.setattr("telephony.pipeline.normalise_audio", lambda pcm: pcm)
         chunks = [b"\x01\x00" * 100, b"\x02\x00" * 100, b"\x03\x00" * 1100, b"\x04\x00" * 100]
         script = [
             (["speech_start"], True),

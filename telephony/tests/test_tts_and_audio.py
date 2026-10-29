@@ -171,3 +171,29 @@ class TestPiperSampleRate:
         monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
         pcm = await PiperTTS().synthesize("Hello", "en")
         assert len(pcm) == 16000 * 2  # still one second, now at 16 kHz
+
+
+class TestAudioProcessorStreaming:
+    def test_high_pass_is_continuous_across_chunks(self) -> None:
+        """Filtering a stream chunk by chunk must equal filtering it in one go."""
+        import numpy as np
+
+        from telephony.audio_utils import AudioProcessor
+
+        signal = (np.sin(np.arange(3200) / 5) * 8000 + 3000).astype(np.int16).tobytes()
+        whole = AudioProcessor().process(signal)
+        streamed = AudioProcessor()
+        chunks = b"".join(streamed.process(signal[i : i + 640]) for i in range(0, len(signal), 640))
+        assert np.abs(
+            np.frombuffer(chunks, np.int16).astype(int) - np.frombuffer(whole, np.int16)
+        ).max() <= 1
+
+    def test_quiet_line_noise_is_not_boosted(self) -> None:
+        import numpy as np
+
+        from telephony.audio_utils import AudioProcessor
+
+        rng = np.random.default_rng(0)
+        hiss = (rng.normal(0, 30, 320)).astype(np.int16).tobytes()  # ~-60 dBFS noise
+        out = np.frombuffer(AudioProcessor().process(hiss), np.int16)
+        assert np.abs(out).max() < 200  # per-chunk normalisation made this ~3000

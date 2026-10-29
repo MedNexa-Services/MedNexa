@@ -36,7 +36,7 @@ import structlog
 
 from telephony.agent_interface import AgentInterface, create_agent
 from telephony.api_client import BackendClient
-from telephony.audio_utils import AudioProcessor
+from telephony.audio_utils import AudioProcessor, normalise_audio
 from telephony.config import get_settings
 from telephony.logging_setup import get_logger
 from telephony.recording import CallRecorder
@@ -210,6 +210,9 @@ class CallPipeline:
 
         # STT
         t0 = time.monotonic()
+        # Level the whole utterance (not per chunk) so quiet lines transcribe well.
+        pcm = normalise_audio(pcm)
+
         # Whisper is blocking: run it off the event loop so other calls keep flowing.
         # No language hint, so each utterance's language is detected afresh.
         result = await asyncio.to_thread(self._stt.transcribe_bytes, pcm)
