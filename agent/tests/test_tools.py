@@ -2,6 +2,8 @@ from datetime import time
 
 import pytest
 from app.models import Appointment, AppointmentStatus
+from app.schemas.hospital import HospitalCreate
+from app.services import hospital_service
 from sqlalchemy import select
 
 from agent.tools import TOOLS, ToolContext, ToolInputError, execute_tool, parse_time
@@ -143,17 +145,40 @@ async def test_tools_needing_caller_id_fail_without_it(ctx, seed) -> None:
     assert result["ok"] is False and "phone number is unavailable" in result["message"]
 
 
-async def test_doctor_from_another_hospital_is_hidden(ctx, seed, session_factory) -> None:
-    other = ToolContext(
-        hospital_id=seed.dermatologist.id,  # any id that isn't this doctor's hospital
-        caller_phone=CALLER,
-        session_factory=session_factory,
-        now=lambda: NOW,
+@pytest.fixture
+async def other_hospital_ctx(ctx, session_factory) -> ToolContext:
+    """A call coming in on a second hospital's line, from the same caller."""
+    async with session_factory() as db:
+        other = await hospital_service.create_hospital(
+            db,
+            HospitalCreate(name="Other Hospital", address="2 Station Rd", phone="+917612999999",
+                           opening_time=time(9), closing_time=time(17)),
+        )  # fmt: skip
+    return ToolContext(other.id, CALLER, session_factory, now=lambda: NOW)
+
+
+async def test_tools_only_reach_this_hospitals_doctors(other_hospital_ctx, seed) -> None:
+    doctor_id = str(seed.cardiologist.id)
+    for tool, args in [
+        ("get_doctor_details", {"doctor_id": doctor_id}),
+        ("check_available_slots", {"doctor_id": doctor_id, "date": MONDAY.isoformat()}),
+        ("book_appointment", {"patient_name": "Rahul Kumar", "doctor_id": doctor_id,
+                              "date": MONDAY.isoformat(), "time": "09:00"}),
+    ]:  # fmt: skip
+        result = await execute_tool(other_hospital_ctx, tool, args)
+        assert result["error"] == "not_found", (tool, result)
+
+
+async def test_tools_only_reach_this_hospitals_appointments(ctx, other_hospital_ctx, seed) -> None:
+    booked = await book(ctx, seed)
+    appt = {"appointment_id": booked["appointment_id"]}
+    cancelled = await execute_tool(other_hospital_ctx, "cancel_appointment", appt)
+    moved = await execute_tool(
+        other_hospital_ctx,
+        "reschedule_appointment",
+        {**appt, "new_date": MONDAY.isoformat(), "new_time": "10:00"},
     )
-    result = await execute_tool(
-        other, "get_doctor_details", {"doctor_id": str(seed.cardiologist.id)}
-    )
-    assert result["ok"] is False
+    assert cancelled["error"] == moved["error"] == "not_found"
 
 
 async def test_transfer_sets_escalation(ctx) -> None:
