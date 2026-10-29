@@ -1,4 +1,5 @@
 from datetime import timedelta
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -45,7 +46,7 @@ async def login(credentials: LoginRequest) -> TokenResponse:
 
 
 @router.get("/me", response_model=StaffUserOut)
-async def get_current_user(current_user: dict = Depends(require_staff)) -> StaffUserOut:
+async def get_current_user(current_user: dict[str, Any] = Depends(require_staff)) -> StaffUserOut:
     """Return the profile of the currently authenticated staff member."""
     return StaffUserOut(
         email=str(current_user.get("sub", "")),

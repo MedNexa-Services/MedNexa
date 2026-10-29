@@ -25,6 +25,11 @@ from typing import AsyncIterator
 
 from telephony.config import get_settings
 from telephony.logging_setup import get_logger
+from telephony.twilio_handler import (
+    pcm_16k_to_ulaw_8k,
+    ulaw_to_linear,
+    upsample_8k_to_16k,
+)
 
 log = get_logger("tts")
 

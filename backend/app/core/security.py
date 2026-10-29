@@ -12,7 +12,7 @@ import hmac
 import json
 import time
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 
 def _b64url_encode(data: bytes) -> str:
@@ -108,7 +108,7 @@ def decode_access_token(token: str) -> dict[str, Any]:
     if exp and time.time() > float(exp):
         raise ValueError("Token has expired")
 
-    return payload
+    return cast(dict[str, Any], payload)
 
 
 def verify_password(plain_password: str, hashed_or_demo: str) -> bool:
