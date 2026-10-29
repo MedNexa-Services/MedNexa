@@ -40,74 +40,11 @@ log = get_logger("twilio")
 
 router = APIRouter(prefix="/twilio", tags=["twilio"])
 
-# ── μ-law codec ────────────────────────────────────────────────────────────────
-
-_ULAW_TABLE: list[int] = []
-
-
-def _build_ulaw_table() -> None:
-    """Pre-compute the μ-law to linear int16 lookup table (ITU-T G.711)."""
-    global _ULAW_TABLE
-    _ULAW_TABLE = []
-    for i in range(256):
-        ulaw = ~i & 0xFF
-        sign = ulaw & 0x80
-        exponent = (ulaw >> 4) & 0x07
-        mantissa = ulaw & 0x0F
-        sample = ((mantissa << 3) + 0x84) << exponent
-        sample -= 0x84
-        if sign:
-            sample = -sample
-        _ULAW_TABLE.append(sample)
-
-
-_build_ulaw_table()
-
-
-def ulaw_to_linear(data: bytes) -> bytes:
-    """Decode G.711 μ-law bytes to 16-bit signed PCM (little-endian)."""
-    return struct.pack(f"<{len(data)}h", *(_ULAW_TABLE[b] for b in data))
-
-
-def upsample_8k_to_16k(pcm_8k: bytes) -> bytes:
-    """Simple 2x linear upsampler: 8 kHz → 16 kHz.
-
-    Each sample is duplicated (nearest-neighbour interpolation). This is
-    sufficient for speech; a polyphase resampler would add latency.
-    """
-    samples = struct.unpack(f"<{len(pcm_8k) // 2}h", pcm_8k)
-    upsampled = []
-    for s in samples:
-        upsampled.extend([s, s])  # duplicate
-    return struct.pack(f"<{len(upsampled)}h", *upsampled)
-
-
-def pcm_16k_to_ulaw_8k(pcm_16k: bytes) -> bytes:
-    """Convert 16 kHz int16 PCM to 8 kHz μ-law for Twilio playback.
-
-    Downsample 2x first (keep every other sample), then encode to μ-law.
-    """
-    samples = struct.unpack(f"<{len(pcm_16k) // 2}h", pcm_16k)
-    downsampled = samples[::2]
-
-    ulaw_bytes = []
-    for sample in downsampled:
-        # G.711 μ-law encode
-        sign = 0
-        if sample < 0:
-            sample = -sample
-            sign = 0x80
-        sample = min(sample, 32767)
-        sample += 0x84
-        exp = 7
-        for exp in range(7, 0, -1):
-            if sample >= (1 << (exp + 3)):
-                break
-        mantissa = (sample >> (exp + 3)) & 0x0F
-        ulaw = ~(sign | (exp << 4) | mantissa) & 0xFF
-        ulaw_bytes.append(ulaw)
-    return bytes(ulaw_bytes)
-
+from telephony.tts import (
+    pcm_16k_to_ulaw_8k,
+    ulaw_to_linear,
+    upsample_8k_to_16k,
+)
 
 # ── TwiML response ─────────────────────────────────────────────────────────────
 
