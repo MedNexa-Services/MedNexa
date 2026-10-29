@@ -1,3 +1,4 @@
+import hmac
 from typing import Annotated, Any
 
 from fastapi import Depends, HTTPException, Query, status
@@ -12,36 +13,56 @@ from app.database import get_db
 DbSession = Annotated[AsyncSession, Depends(get_db)]
 
 bearer_scheme = HTTPBearer(auto_error=False)
+BearerCredentials = Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)]
 
 
-async def require_staff(
-    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)] = None,
-) -> dict[str, Any]:
-    """Authentication hook for every protected /api/v1 route (Part 5 - Task 5.3).
+def _unauthorized(detail: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail=detail,
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
-    Validates HS256 JWT Bearer token.
-    Returns the decoded token payload on success, or raises 401 Unauthorized.
-    """
+
+def _staff_from(credentials: HTTPAuthorizationCredentials | None) -> dict[str, Any]:
     settings = get_settings()
     if not settings.auth_enabled:
-        return {"sub": settings.admin_email, "role": "Hospital Staff", "name": "Dr. Admin"}
-
+        return {"sub": settings.admin_email, "role": "Hospital Staff", "name": settings.admin_name}
     if not credentials:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing authentication token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
+        raise _unauthorized("Missing authentication token")
     try:
-        payload = decode_access_token(credentials.credentials)
-        return payload
+        return decode_access_token(credentials.credentials)
     except ValueError as exc:
+        raise _unauthorized(f"Invalid authentication token: {exc}") from exc
+    except RuntimeError as exc:  # server misconfiguration: never accept anything
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid authentication token: {exc}",
-            headers={"WWW-Authenticate": "Bearer"},
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Authentication unavailable"
         ) from exc
+
+
+async def require_staff(credentials: BearerCredentials = None) -> dict[str, Any]:
+    """Authentication for every protected /api/v1 route (Part 5 - Task 5.3).
+
+    Requires a valid staff JWT (Authorization: Bearer ...) and returns its payload,
+    or raises 401.
+    """
+    return _staff_from(credentials)
+
+
+async def require_staff_or_service(credentials: BearerCredentials = None) -> dict[str, Any]:
+    """Like require_staff, but also accepts the telephony service key.
+
+    Used on the /calls routes only, which the call pipeline writes to. The key is
+    compared in constant time and grants nothing outside those routes.
+    """
+    key = get_settings().service_api_key
+    if (
+        key
+        and credentials
+        and hmac.compare_digest(credentials.credentials.encode("utf-8"), key.encode("utf-8"))
+    ):
+        return {"sub": "service:telephony", "role": "Service", "name": "Telephony service"}
+    return _staff_from(credentials)
 
 
 class PageParams(BaseModel):

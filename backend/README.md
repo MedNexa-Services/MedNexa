@@ -122,9 +122,23 @@ typed client from it. Lists return `{items, total, limit, offset}` and take
 Staff cancel/reschedule (`POST /appointments/{id}/cancel|reschedule`) skip the
 phone-ownership check.
 
+## Authentication
+
+Every `/api/v1` route except `/health` and `/auth/login` needs a staff token
+(`Authorization: Bearer <jwt>`), obtained from `POST /api/v1/auth/login`.
+
+- The API **refuses to start** until `MEDNEXA_JWT_SECRET` (32+ characters),
+  `MEDNEXA_ADMIN_EMAIL` and `MEDNEXA_ADMIN_PASSWORD` are set; there are no default
+  credentials or keys. For local work without login set `MEDNEXA_AUTH_ENABLED=false`.
+- `MEDNEXA_ADMIN_PASSWORD` may be a PBKDF2 hash: `uv run python -m app.core.security`.
+- Login is throttled: 5 wrong passwords per account (30 per address) per 5 minutes
+  return 429. The limiter is per process (use Redis if you run several workers).
+- The telephony service authenticates with `MEDNEXA_SERVICE_API_KEY`, which works on
+  the `/calls` routes only and opens nothing else.
+
 ## For Part 5 (DevOps)
 
-- Authentication: replace the body of `require_staff` in `app/api/deps.py` with
-  JWT validation; every route except `/api/v1/health` already depends on it.
+- Authentication is implemented (see above); every route except `/api/v1/health` and
+  `/api/v1/auth/login` depends on `require_staff`.
 - Health check: `GET /api/v1/health` returns 503 if the database is unreachable.
 - Run `alembic upgrade head` before starting the API in each deployment.
