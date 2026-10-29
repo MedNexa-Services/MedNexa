@@ -22,7 +22,7 @@ _MEDICAL_ADVICE = [
     re.compile(p, re.I)
     for p in (
         r"\b\d+(\.\d+)?\s?(mg|mcg|ml|milligrams?)\b",
-        r"\b(take|taking|have|try)\b.{0,40}\b(tablets?|pills?|capsules?|syrups?|paracetamol|"
+        r"\b(take|taking|try)\b.{0,40}\b(tablets?|pills?|capsules?|syrups?|paracetamol|"
         r"ibuprofen|aspirin|crocin|dolo|antibiotics?|painkillers?|medicines?|medications?)\b",
         r"\b(dosage|dose of)\b",
         r"\bi (would )?(recommend|suggest|prescribe)\b.{0,40}\b(tablets?|pills?|medicines?|"
