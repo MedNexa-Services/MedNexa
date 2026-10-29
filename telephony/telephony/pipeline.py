@@ -46,6 +46,10 @@ from telephony.vad import SileroVAD
 log = get_logger("pipeline")
 
 SendAudioFn = Callable[[bytes], Awaitable[None]]
+ClearAudioFn = Callable[[], Awaitable[None]]
+
+# Pipeline audio: 16 kHz mono int16 -> 32000 bytes per second of playback.
+PCM_BYTES_PER_SECOND = 16000 * 2
 
 # Maximum buffer for one utterance (prevents runaway memory if VAD misses end)
 MAX_UTTERANCE_BYTES = 16000 * 2 * 30  # 30 seconds of 16 kHz int16
@@ -62,6 +66,9 @@ class CallPipeline:
         E.164 phone number of the caller (e.g. "+919876543210").
     send_audio:
         Async function that sends a raw PCM chunk to the caller.
+    clear_audio:
+        Optional async function that discards audio already queued on the
+        caller's side (Twilio's "clear"), used when the caller barges in.
     agent:
         MedNexaAgent or StubAgent instance.
     """
@@ -72,12 +79,14 @@ class CallPipeline:
         caller_phone: str,
         send_audio: SendAudioFn,
         *,
+        clear_audio: ClearAudioFn | None = None,
         agent: AgentInterface | None = None,
     ) -> None:
         cfg = get_settings()
         self.session_id = session_id
         self.caller_phone = caller_phone
         self._send_audio = send_audio
+        self._clear_audio = clear_audio
         self._cfg = cfg
 
         # Core components
@@ -92,8 +101,9 @@ class CallPipeline:
         # State
         self._language: str = "en"
         self._utterance_buf: bytearray = bytearray()
-        self._tts_playing = asyncio.Event()
-        self._tts_playing.clear()  # not playing initially
+        # Audio is sent faster than real time and buffered by the telephony side,
+        # so "playing" lasts until the caller has actually heard it all.
+        self._playback_until: float = 0.0
         self._barge_in_triggered = asyncio.Event()
         self._call_active = True
         self._start_time: float = 0.0
@@ -169,10 +179,9 @@ class CallPipeline:
             if speaking:
                 self._last_speech_time = time.monotonic()
 
-                # Barge-in: interrupt TTS if currently speaking
-                if self._cfg.barge_in_enabled and self._tts_playing.is_set():
-                    self._barge_in_triggered.set()
-                    log.debug("barge_in", session_id=self.session_id)
+                # Barge-in: interrupt TTS if the caller is still hearing it
+                if self._cfg.barge_in_enabled and self._is_playing():
+                    await self._interrupt_playback()
 
             # Keep each chunk once while an utterance is open. VAD works in 32 ms
             # frames, so a short chunk can carry no event at all mid-utterance,
@@ -258,10 +267,20 @@ class CallPipeline:
 
     # ── TTS playback ──────────────────────────────────────────────────────────
 
+    def _is_playing(self) -> bool:
+        return time.monotonic() < self._playback_until
+
+    async def _interrupt_playback(self) -> None:
+        """Stop the current reply: no more chunks, and drop what is already queued."""
+        self._barge_in_triggered.set()
+        self._playback_until = 0.0
+        log.debug("barge_in", session_id=self.session_id)
+        if self._clear_audio is not None:
+            await self._clear_audio()
+
     async def _speak(self, text: str, language: str | None = None) -> None:
         """Synthesise text and stream audio to the caller."""
         lang = language or self._language
-        self._tts_playing.set()
         self._barge_in_triggered.clear()
 
         t0 = time.monotonic()
@@ -271,10 +290,11 @@ class CallPipeline:
                     log.debug("tts_interrupted", session_id=self.session_id)
                     break
                 await self._send_audio(chunk)
+                start = max(self._playback_until, time.monotonic())
+                self._playback_until = start + len(chunk) / PCM_BYTES_PER_SECOND
         finally:
             tts_ms = int((time.monotonic() - t0) * 1000)
             log.debug("tts_done", tts_ms=tts_ms, lang=lang)
-            self._tts_playing.clear()
 
     # ── logging ───────────────────────────────────────────────────────────────
 

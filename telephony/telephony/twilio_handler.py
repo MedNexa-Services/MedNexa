@@ -245,7 +245,11 @@ async def stream_websocket(websocket: WebSocket, call_sid: str) -> None:
             await websocket.close(code=1008)
         return
 
-    pipeline = CallPipeline(session_id, caller_phone, send_audio)
+    async def clear_audio() -> None:
+        """Make Twilio discard audio it has buffered but not yet played (barge-in)."""
+        await send_json({"event": "clear", "streamSid": stream_sid})
+
+    pipeline = CallPipeline(session_id, caller_phone, send_audio, clear_audio=clear_audio)
 
     pipeline_task = asyncio.create_task(pipeline.run(audio_generator()))
 

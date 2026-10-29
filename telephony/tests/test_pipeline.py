@@ -143,16 +143,18 @@ class TestPipelineUtterance:
     ) -> None:
         """When VAD signals speech_end, STT and agent should be called."""
         # Produce speech_start → speech_end → silence from the mock VAD
-        events_iter = iter([
-            ["speech_start"],  # first chunk
-            ["speech", "speech_end"],  # second chunk — triggers STT
-            ["silence"],
-        ])
+        events_iter = iter(
+            [
+                ["speech_start"],  # first chunk
+                ["speech", "speech_end"],  # second chunk — triggers STT
+                ["silence"],
+            ]
+        )
         mock_vad.process_chunk.side_effect = list(events_iter)
 
         chunks_to_send = [
-            _make_speech_chunk(3),   # speech_start
-            _make_speech_chunk(5),   # speech_end
+            _make_speech_chunk(3),  # speech_start
+            _make_speech_chunk(5),  # speech_end
             _make_silence_chunk(1),  # silence (stops the loop naturally)
         ]
 
@@ -247,3 +249,74 @@ class TestUtteranceBuffering:
 
         transcribed = mock_stt.transcribe_bytes.call_args.args[0]
         assert transcribed == b"".join(chunks)
+
+
+class TestBargeIn:
+    @pytest.mark.asyncio
+    async def test_caller_speech_during_playback_clears_queued_audio(
+        self,
+        mock_vad: MagicMock,
+        mock_stt: MagicMock,
+        mock_api: MagicMock,
+        mock_recorder: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Audio is sent faster than real time; the caller is still hearing the
+        greeting when they start talking, so the queued audio must be cleared."""
+
+        async def one_second_of_speech(text: str, lang: str) -> AsyncIterator[bytes]:
+            for _ in range(10):
+                yield b"\x00" * 3200  # 10 x 100 ms
+
+        tts = MagicMock()
+        tts.stream = one_second_of_speech
+        monkeypatch.setattr("telephony.pipeline.TTSEngine", lambda: tts)
+
+        events = [["speech_start"], ["speech"]]
+
+        def process_chunk(chunk: bytes) -> list[str]:
+            mock_vad.in_speech = True
+            return events.pop(0) if events else ["speech"]
+
+        mock_vad.process_chunk.side_effect = process_chunk
+
+        async def caller_interrupts() -> AsyncIterator[bytes]:
+            yield b"\x01\x00" * 320
+            yield b"\x01\x00" * 320
+
+        clear = AsyncMock()
+
+        async def send(chunk: bytes) -> None:
+            pass
+
+        pipeline = CallPipeline(
+            "sess-barge", "+911234567890", send, clear_audio=clear, agent=StubAgent()
+        )
+        await pipeline.run(caller_interrupts())
+
+        clear.assert_awaited_once()  # once, not again for the second speech chunk
+
+    @pytest.mark.asyncio
+    async def test_no_clear_when_nothing_is_playing(
+        self,
+        mock_vad: MagicMock,
+        mock_stt: MagicMock,
+        mock_tts: MagicMock,
+        mock_api: MagicMock,
+        mock_recorder: MagicMock,
+    ) -> None:
+        mock_vad.process_chunk.side_effect = lambda chunk: ["speech_start"]
+        clear = AsyncMock()
+
+        async def caller_speaks() -> AsyncIterator[bytes]:
+            await asyncio.sleep(0.05)  # the tiny greeting (100 bytes) has finished playing
+            yield b"\x01\x00" * 320
+
+        async def send(chunk: bytes) -> None:
+            pass
+
+        pipeline = CallPipeline(
+            "sess-quiet", "+911234567890", send, clear_audio=clear, agent=StubAgent()
+        )
+        await pipeline.run(caller_speaks())
+        clear.assert_not_awaited()
