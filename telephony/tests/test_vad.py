@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-import struct
-from typing import Generator
-
 import numpy as np
 import pytest
 
 from telephony.vad import FRAME_BYTES, FRAME_SAMPLES, SileroVAD
-
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -88,15 +84,13 @@ class TestVadHelpers:
         vad._min_speech_ms = 250
         vad._min_silence_ms = 600
         vad._sample_rate = 16000
-        vad._in_speech = True         # pretend we're already in speech
+        vad._in_speech = True  # pretend we're already in speech
         vad._speech_start_ms = 0.0
         vad._silence_start_ms = 0.0
-        vad._elapsed_ms = 500.0       # 500 ms of speech already happened
+        vad._elapsed_ms = 500.0  # 500 ms of speech already happened
         vad._leftover = b""
 
         # Simulate 25 frames of silence (25 × 32 ms = 800 ms > min_silence_ms=600)
-        call_count = [0]
-
         def mock_silence(samples: object) -> bool:
             return False  # all silence
 

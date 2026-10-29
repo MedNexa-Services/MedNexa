@@ -12,8 +12,6 @@ Endpoints used (from Part 1's /api/v1):
 
 from __future__ import annotations
 
-import uuid
-from datetime import datetime
 from typing import Any
 
 import httpx
@@ -41,7 +39,7 @@ class BackendClient:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    async def __aenter__(self) -> "BackendClient":
+    async def __aenter__(self) -> BackendClient:
         return self
 
     async def __aexit__(self, *_: Any) -> None:

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from telephony.config import TelephonySettings, get_settings
+from telephony.config import TelephonySettings
 
 
 @pytest.fixture(autouse=True)

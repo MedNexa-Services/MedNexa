@@ -12,9 +12,8 @@ with the final data size.
 
 from __future__ import annotations
 
-import struct
 import wave
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from pathlib import Path
 
 from telephony.config import get_settings
@@ -56,7 +55,7 @@ class CallRecorder:
             ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
             self._path = recordings_dir / f"{session_id}_{ts}.wav"
 
-    def __enter__(self) -> "CallRecorder":
+    def __enter__(self) -> CallRecorder:
         if self._enabled and self._path:
             self._wav = wave.open(str(self._path), "wb")
             self._wav.setnchannels(1)

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import struct
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -64,17 +63,20 @@ class TestTranscribeBytes:
         mock_info.language = "en"
         mock_info.duration = 2.0
 
-        with patch.object(stt, "_load"):
-            with patch.object(
-                stt, "_transcribe_array",
+        with (
+            patch.object(stt, "_load"),
+            patch.object(
+                stt,
+                "_transcribe_array",
                 return_value=TranscriptionResult(
                     text="Hello, how can I help?",
                     language="en",
                     confidence=0.9,
                     duration_seconds=2.0,
-                )
-            ):
-                result = stt.transcribe_bytes(self._make_pcm(2.0))
+                ),
+            ),
+        ):
+            result = stt.transcribe_bytes(self._make_pcm(2.0))
 
         assert result.text == "Hello, how can I help?"
         assert result.language == "en"
@@ -92,17 +94,17 @@ class TestTranscribeBytes:
 
         captured: dict[str, object] = {}
 
-        def fake_transcribe(
-            samples: object, *, language_hint: str | None
-        ) -> TranscriptionResult:
+        def fake_transcribe(samples: object, *, language_hint: str | None) -> TranscriptionResult:
             captured["hint"] = language_hint
             return TranscriptionResult(
                 text="नमस्ते", language="hi", confidence=0.85, duration_seconds=1.0
             )
 
-        with patch.object(stt, "_load"):
-            with patch.object(stt, "_transcribe_array", side_effect=fake_transcribe):
-                stt.transcribe_bytes(self._make_pcm(), language_hint="hi")
+        with (
+            patch.object(stt, "_load"),
+            patch.object(stt, "_transcribe_array", side_effect=fake_transcribe),
+        ):
+            stt.transcribe_bytes(self._make_pcm(), language_hint="hi")
 
         assert captured["hint"] == "hi"
 

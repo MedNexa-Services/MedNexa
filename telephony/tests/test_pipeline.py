@@ -13,10 +13,8 @@ No external services or GPU required.
 from __future__ import annotations
 
 import asyncio
-import struct
-from collections import deque
-from typing import AsyncIterator
-from unittest.mock import AsyncMock, MagicMock, patch
+from collections.abc import AsyncIterator
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 

@@ -29,10 +29,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from collections.abc import AsyncIterator, Callable, Awaitable
-from typing import Any
-
-import structlog
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 from telephony.agent_interface import AgentInterface, create_agent
 from telephony.api_client import BackendClient
@@ -138,7 +135,7 @@ class CallPipeline:
             try:
                 async with asyncio.timeout(self._cfg.call_timeout_seconds):
                     await self._process_stream(audio_stream)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 log.warning("call_timeout", session_id=self.session_id)
                 timeout_msg = (
                     "I'm sorry, the call has exceeded the maximum duration. Goodbye!"

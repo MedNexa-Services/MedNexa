@@ -14,8 +14,9 @@ Run with::
 from __future__ import annotations
 
 import asyncio
+import contextlib
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,7 +26,6 @@ from telephony.api_client import BackendClient
 from telephony.config import get_settings
 from telephony.logging_setup import configure_logging, get_logger
 from telephony.stt import FasterWhisperSTT
-from telephony.tts import TTSEngine
 from telephony.twilio_handler import router as twilio_router
 from telephony.vad import SileroVAD
 
@@ -62,7 +62,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # type: ignore[type-ar
 
 
 def create_app() -> FastAPI:
-    cfg = get_settings()
     app = FastAPI(
         title="MedNexa Telephony",
         description="Voice/Telephony pipeline — Part 3",
@@ -85,10 +84,12 @@ def create_app() -> FastAPI:
     async def health() -> JSONResponse:
         async with BackendClient() as client:
             backend_ok = await client.health_check()
-        return JSONResponse({
-            "status": "ok",
-            "backend_connected": backend_ok,
-        })
+        return JSONResponse(
+            {
+                "status": "ok",
+                "backend_connected": backend_ok,
+            }
+        )
 
     # ── Local WebSocket test bridge ───────────────────────────────────────────
     # Connect with a raw WebSocket client and stream raw 16 kHz PCM audio.
@@ -136,10 +137,8 @@ def create_app() -> FastAPI:
                 yield chunk
 
         async def send_audio(pcm: bytes) -> None:
-            try:
+            with contextlib.suppress(Exception):  # client may have disconnected
                 await websocket.send_bytes(pcm)
-            except Exception:
-                pass
 
         recv_task = asyncio.create_task(receive_loop())
         pipeline = CallPipeline(session_id, caller_phone, send_audio)

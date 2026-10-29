@@ -2,19 +2,16 @@
 
 from __future__ import annotations
 
-import struct
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from telephony.tts import (
     CHUNK_BYTES,
-    EdgeTTS,
     PiperTTS,
     TTSEngine,
 )
-
 
 # ── TTSEngine ─────────────────────────────────────────────────────────────────
 
@@ -102,11 +99,13 @@ class TestTTSEngine:
 class TestAudioUtils:
     def test_normalise_silence_unchanged(self) -> None:
         from telephony.audio_utils import normalise_audio
+
         silent = b"\x00" * 3200
         assert normalise_audio(silent) == silent
 
     def test_normalise_amplifies_quiet_signal(self) -> None:
         import numpy as np
+
         from telephony.audio_utils import normalise_audio, pcm_to_float
 
         # Very quiet signal
@@ -120,6 +119,7 @@ class TestAudioUtils:
 
     def test_high_pass_returns_same_length(self) -> None:
         import numpy as np
+
         from telephony.audio_utils import apply_high_pass
 
         samples = (np.random.randn(3200) * 1000).astype(np.int16)
@@ -129,10 +129,12 @@ class TestAudioUtils:
 
     def test_detect_silence_on_zeros(self) -> None:
         from telephony.audio_utils import detect_silence
+
         assert detect_silence(b"\x00" * 3200) is True
 
     def test_detect_silence_on_tone(self) -> None:
         import numpy as np
+
         from telephony.audio_utils import detect_silence
 
         t = np.linspace(0, 1, 16000)
@@ -183,9 +185,12 @@ class TestAudioProcessorStreaming:
         whole = AudioProcessor().process(signal)
         streamed = AudioProcessor()
         chunks = b"".join(streamed.process(signal[i : i + 640]) for i in range(0, len(signal), 640))
-        assert np.abs(
-            np.frombuffer(chunks, np.int16).astype(int) - np.frombuffer(whole, np.int16)
-        ).max() <= 1
+        assert (
+            np.abs(
+                np.frombuffer(chunks, np.int16).astype(int) - np.frombuffer(whole, np.int16)
+            ).max()
+            <= 1
+        )
 
     def test_quiet_line_noise_is_not_boosted(self) -> None:
         import numpy as np

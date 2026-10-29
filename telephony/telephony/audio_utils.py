@@ -13,7 +13,6 @@ All functions operate on raw int16 PCM bytes at 16 kHz mono.
 
 from __future__ import annotations
 
-import struct
 from typing import Final
 
 import numpy as np
@@ -29,13 +28,13 @@ INT16_MAX: Final[float] = 32767.0
 TARGET_RMS_FRACTION: Final[float] = 0.1
 
 
-def pcm_to_float(raw: bytes) -> "np.ndarray[np.float32, np.dtype[np.float32]]":
+def pcm_to_float(raw: bytes) -> np.ndarray[np.float32, np.dtype[np.float32]]:
     """Convert int16 LE PCM bytes to float32 in [-1, 1]."""
     arr = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
     return arr / INT16_MAX
 
 
-def float_to_pcm(arr: "np.ndarray[np.float32, np.dtype[np.float32]]") -> bytes:
+def float_to_pcm(arr: np.ndarray[np.float32, np.dtype[np.float32]]) -> bytes:
     """Convert float32 [-1, 1] to int16 LE PCM bytes."""
     clipped = np.clip(arr, -1.0, 1.0)
     return (clipped * INT16_MAX).astype(np.int16).tobytes()
@@ -64,11 +63,11 @@ def _high_pass_alpha(cutoff_hz: float) -> float:
 
 
 def _high_pass(
-    arr: "np.ndarray[np.float32, np.dtype[np.float32]]",
+    arr: np.ndarray[np.float32, np.dtype[np.float32]],
     alpha: float,
     prev_x: float,
     prev_y: float,
-) -> tuple["np.ndarray[np.float32, np.dtype[np.float32]]", float, float]:
+) -> tuple[np.ndarray[np.float32, np.dtype[np.float32]], float, float]:
     """1st-order IIR high-pass, continuing from the previous chunk's last sample."""
     filtered = np.empty_like(arr)
     for i, x in enumerate(arr):

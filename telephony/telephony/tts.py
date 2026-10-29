@@ -21,8 +21,8 @@ import asyncio
 import json
 import subprocess
 import tempfile
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import AsyncIterator
 
 from telephony.audio_codec import resample
 from telephony.config import get_settings
@@ -44,7 +44,7 @@ WAV_HEADER_BYTES = 44
 # How large each yielded chunk is (100 ms of audio)
 CHUNK_MS = 100
 CHUNK_SAMPLES = SAMPLE_RATE * CHUNK_MS // 1000  # 1600 samples
-CHUNK_BYTES = CHUNK_SAMPLES * SAMPLE_WIDTH       # 3200 bytes
+CHUNK_BYTES = CHUNK_SAMPLES * SAMPLE_WIDTH  # 3200 bytes
 
 
 # ── Piper TTS ─────────────────────────────────────────────────────────────────
@@ -100,8 +100,9 @@ class PiperTTS:
 
         cmd = [
             self._binary,
-            "--model", str(voice),
-            "--output-raw",   # raw PCM output
+            "--model",
+            str(voice),
+            "--output-raw",  # raw PCM output
         ]
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -116,9 +117,7 @@ class PiperTTS:
         # rate (22050 Hz for *-medium voices); the pipeline plays 16 kHz.
         return resample(raw_out, self._voice_sample_rate(voice), SAMPLE_RATE)
 
-    async def async_synthesize(
-        self, text: str, language: str = "en"
-    ) -> AsyncIterator[bytes]:
+    async def async_synthesize(self, text: str, language: str = "en") -> AsyncIterator[bytes]:
         """Stream raw PCM chunks from Piper."""
         pcm = await self.synthesize(text, language)
         for i in range(0, len(pcm), CHUNK_BYTES):
@@ -169,13 +168,13 @@ class EdgeTTS:
             tmp_path = f.name
 
         audio = AudioSegment.from_mp3(tmp_path)
-        audio = audio.set_frame_rate(SAMPLE_RATE).set_channels(CHANNELS).set_sample_width(SAMPLE_WIDTH)
-        Path(tmp_path).unlink(missing_ok=True)
+        audio = (
+            audio.set_frame_rate(SAMPLE_RATE).set_channels(CHANNELS).set_sample_width(SAMPLE_WIDTH)
+        )
+        Path(tmp_path).unlink(missing_ok=True)  # noqa: ASYNC240 - tiny local temp file
         return audio.raw_data  # type: ignore[return-value]
 
-    async def async_synthesize(
-        self, text: str, language: str = "en"
-    ) -> AsyncIterator[bytes]:
+    async def async_synthesize(self, text: str, language: str = "en") -> AsyncIterator[bytes]:
         """Stream raw PCM chunks from Edge-TTS."""
         pcm = await self.synthesize(text, language)
         for i in range(0, len(pcm), CHUNK_BYTES):
@@ -223,9 +222,7 @@ class TTSEngine:
         log.debug("tts_edge", lang=language, chars=len(text))
         return await self._edge.synthesize(text, language)
 
-    async def stream(
-        self, text: str, language: str = "en"
-    ) -> AsyncIterator[bytes]:
+    async def stream(self, text: str, language: str = "en") -> AsyncIterator[bytes]:
         """Yield raw PCM chunks as they become available."""
         pcm = await self.speak(text, language)
         for i in range(0, len(pcm), CHUNK_BYTES):
