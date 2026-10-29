@@ -92,17 +92,26 @@ class ModelRouter:
     def _choose(self, language: str) -> list[tuple[ChatProvider, float]]:
         """Ordered (provider, timeout) attempts for this call."""
         s = self._settings
-        local = (self._local, s.max_latency_seconds) if self._local else None
-        cloud = (self._cloud, s.cloud_timeout_seconds) if self._cloud else None
-
         if s.llm_mode == LLMMode.LOCAL:
-            # No latency cap when local is the only option: a slow answer beats none.
-            return [(self._local, s.cloud_timeout_seconds)] if self._local else []
-        if s.llm_mode == LLMMode.CLOUD:
-            return [cloud] if cloud else []
-        prefer_cloud = self.circuit_open or (language == "hi" and s.hindi_prefers_cloud)
-        order = [cloud, local] if prefer_cloud else [local, cloud]
-        return [attempt for attempt in order if attempt is not None]
+            order = [self._local]
+        elif s.llm_mode == LLMMode.CLOUD:
+            order = [self._cloud]
+        elif self.circuit_open or (language == "hi" and s.hindi_prefers_cloud):
+            order = [self._cloud, self._local]
+        else:
+            order = [self._local, self._cloud]
+        providers = [p for p in order if p is not None]
+        # The latency cap only applies to the local model when a cloud attempt follows;
+        # when it is the last option, a slow answer beats none.
+        return [
+            (
+                p,
+                s.max_latency_seconds
+                if p is self._local and i < len(providers) - 1
+                else s.cloud_timeout_seconds,
+            )
+            for i, p in enumerate(providers)
+        ]
 
     async def ainvoke(
         self,

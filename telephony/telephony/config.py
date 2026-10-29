@@ -5,7 +5,6 @@ All variables are prefixed MEDNEXA_TEL_ in the environment / .env file.
 
 from __future__ import annotations
 
-from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,6 +21,9 @@ class TelephonySettings(BaseSettings):
 
     hospital_id: str = ""
     """UUID of the hospital this pipeline serves. Set in .env."""
+
+    use_stub_agent: bool = False
+    """Use the canned StubAgent even when Part 2's agent package is installed."""
 
     # ── Twilio ───────────────────────────────────────────────────────────────
     twilio_account_sid: str = ""

@@ -7,9 +7,11 @@ const eslintConfig = defineConfig([
   ...nextTs,
   {
     rules: {
+      // Every page loads data with "useEffect -> fetch -> setState". This React 19 rule
+      // flags the loading flag set at the start of such an effect (24 places). Fixing it
+      // properly means moving data fetching to a query library (TanStack Query/SWR),
+      // a separate refactor, so it is reported but does not fail the build.
       "react-hooks/set-state-in-effect": "warn",
-      "@typescript-eslint/no-explicit-any": "warn",
-      "@typescript-eslint/no-unused-vars": "warn",
     },
   },
   // Override default ignores of eslint-config-next.

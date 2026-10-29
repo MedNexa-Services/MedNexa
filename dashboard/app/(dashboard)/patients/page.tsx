@@ -105,11 +105,6 @@ export default function PatientsPage() {
     setPageIndex(0);
   };
 
-  const handleQuickPhonePreset = (phoneStr: string) => {
-    setSearchQuery(phoneStr);
-    setPageIndex(0);
-  };
-
   const getInitials = (nameStr: string) => {
     const parts = nameStr.trim().split(" ");
     if (parts.length >= 2) {
@@ -193,58 +188,6 @@ export default function PatientsPage() {
             <span>Search</span>
           </Button>
         </form>
-
-        {/* Quick Seed Presets */}
-        <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border/60 text-xs">
-          <span className="text-muted-foreground font-semibold flex items-center gap-1">
-            <Phone className="w-3 h-3" />
-            Quick Presets:
-          </span>
-          <button
-            type="button"
-            onClick={() => handleQuickPhonePreset("")}
-            className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-              searchQuery === ""
-                ? "bg-primary text-primary-foreground font-semibold"
-                : "bg-muted hover:bg-muted/80 text-foreground"
-            }`}
-          >
-            All Patients
-          </button>
-          <button
-            type="button"
-            onClick={() => handleQuickPhonePreset("+919876543210")}
-            className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-              searchQuery === "+919876543210"
-                ? "bg-primary text-primary-foreground font-semibold"
-                : "bg-muted hover:bg-muted/80 text-foreground"
-            }`}
-          >
-            +91 98765 43210 (Rahul &amp; Sita)
-          </button>
-          <button
-            type="button"
-            onClick={() => handleQuickPhonePreset("+919900112233")}
-            className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-              searchQuery === "+919900112233"
-                ? "bg-primary text-primary-foreground font-semibold"
-                : "bg-muted hover:bg-muted/80 text-foreground"
-            }`}
-          >
-            +91 99001 12233 (Mohan Lal)
-          </button>
-          <button
-            type="button"
-            onClick={() => handleQuickPhonePreset("+919812345678")}
-            className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-              searchQuery === "+919812345678"
-                ? "bg-primary text-primary-foreground font-semibold"
-                : "bg-muted hover:bg-muted/80 text-foreground"
-            }`}
-          >
-            +91 98123 45678 (Priya Sharma)
-          </button>
-        </div>
       </Card>
 
       {/* Patients Table */}

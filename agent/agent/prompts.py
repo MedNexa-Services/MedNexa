@@ -147,8 +147,10 @@ switch with them.
 {RULES}"""
 
 
-def greeting(ctx: HospitalContext) -> str:
+def greeting(ctx: HospitalContext | None) -> str:
+    """Opening line; works without hospital context (e.g. the database is down)."""
+    calling = f"Thank you for calling {ctx.name}." if ctx else "Thank you for calling."
     return (
-        f"Namaste! Thank you for calling {ctx.name}. I'm the AI receptionist. "
+        f"Namaste! {calling} I'm the AI receptionist. "
         "How can I help you today? आप हिंदी में भी बात कर सकते हैं।"
     )

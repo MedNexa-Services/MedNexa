@@ -100,7 +100,7 @@ export default function DashboardShellLayout({
                 <div className="flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
                   <span>
-                    <strong>Backend Notice:</strong> {hospitalError}. MedNexa is operating in cached mode.
+                    <strong>Backend unreachable:</strong> {hospitalError}. Data on this page may be missing or out of date.
                   </span>
                 </div>
                 <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">

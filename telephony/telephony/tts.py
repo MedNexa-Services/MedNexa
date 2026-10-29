@@ -18,74 +18,15 @@ Piper setup:
 from __future__ import annotations
 
 import asyncio
+import json
 import subprocess
 import tempfile
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import AsyncIterator
 
+from telephony.audio_codec import resample
 from telephony.config import get_settings
 from telephony.logging_setup import get_logger
-import struct
-
-_ULAW_TABLE: list[int] = []
-
-
-def _build_ulaw_table() -> None:
-    """Pre-compute the μ-law to linear int16 lookup table (ITU-T G.711)."""
-    global _ULAW_TABLE
-    _ULAW_TABLE = []
-    for i in range(256):
-        ulaw = ~i & 0xFF
-        sign = ulaw & 0x80
-        exponent = (ulaw >> 4) & 0x07
-        mantissa = ulaw & 0x0F
-        sample = ((mantissa << 3) + 0x84) << exponent
-        sample -= 0x84
-        if sign:
-            sample = -sample
-        _ULAW_TABLE.append(sample)
-
-
-_build_ulaw_table()
-
-
-def ulaw_to_linear(data: bytes) -> bytes:
-    """Decode G.711 μ-law bytes to 16-bit signed PCM (little-endian)."""
-    return struct.pack(f"<{len(data)}h", *(_ULAW_TABLE[b] for b in data))
-
-
-def upsample_8k_to_16k(pcm_8k: bytes) -> bytes:
-    """Simple 2x linear upsampler: 8 kHz → 16 kHz."""
-    samples = struct.unpack(f"<{len(pcm_8k) // 2}h", pcm_8k)
-    upsampled = []
-    for s in samples:
-        upsampled.extend([s, s])
-    return struct.pack(f"<{len(upsampled)}h", *upsampled)
-
-
-def pcm_16k_to_ulaw_8k(pcm_16k: bytes) -> bytes:
-    """Convert 16 kHz int16 PCM to 8 kHz μ-law for Twilio playback."""
-    samples = struct.unpack(f"<{len(pcm_16k) // 2}h", pcm_16k)
-    downsampled = samples[::2]
-
-    ulaw_bytes = []
-    for sample in downsampled:
-        sign = 0
-        if sample < 0:
-            sample = -sample
-            sign = 0x80
-        sample = min(sample, 32767)
-        sample += 0x84
-        exp = 7
-        for exp in range(7, 0, -1):
-            if sample >= (1 << (exp + 3)):
-                break
-        mantissa = (sample >> (exp + 3)) & 0x0F
-        ulaw = ~(sign | (exp << 4) | mantissa) & 0xFF
-        ulaw_bytes.append(ulaw)
-    return bytes(ulaw_bytes)
-
-
 log = get_logger("tts")
 
 # Output audio spec (must match what Asterisk/Twilio expects)
@@ -93,13 +34,16 @@ SAMPLE_RATE = 16000
 CHANNELS = 1
 SAMPLE_WIDTH = 2  # bytes, int16
 
+# Used when a Piper voice has no readable .onnx.json (the rate of *-medium voices).
+PIPER_DEFAULT_RATE = 22050
+
 # WAV header is 44 bytes; we strip it and send raw PCM downstream.
 WAV_HEADER_BYTES = 44
 
 # How large each yielded chunk is (100 ms of audio)
 CHUNK_MS = 100
 CHUNK_SAMPLES = SAMPLE_RATE * CHUNK_MS // 1000  # 1600 samples
-CHUNK_BYTES = CHUNK_SAMPLES * SAMPLE_WIDTH       # 3200 bytes
+CHUNK_BYTES = CHUNK_SAMPLES * SAMPLE_WIDTH  # 3200 bytes
 
 
 # ── Piper TTS ─────────────────────────────────────────────────────────────────
@@ -125,6 +69,16 @@ class PiperTTS:
         voice_name = self._voices.get(language, self._voices["en"])
         return self._models_dir / f"{voice_name}.onnx"
 
+    @staticmethod
+    def _voice_sample_rate(voice: Path) -> int:
+        """Native output rate of a Piper voice, from its <voice>.onnx.json config."""
+        config = voice.with_name(voice.name + ".json")
+        try:
+            return int(json.loads(config.read_text())["audio"]["sample_rate"])
+        except (OSError, KeyError, ValueError, TypeError):
+            log.warning("piper_sample_rate_unknown", config=str(config), assumed=PIPER_DEFAULT_RATE)
+            return PIPER_DEFAULT_RATE
+
     def _is_available(self) -> bool:
         """Check if the piper binary exists and a model file is present."""
         try:
@@ -145,8 +99,9 @@ class PiperTTS:
 
         cmd = [
             self._binary,
-            "--model", str(voice),
-            "--output-raw",   # raw PCM output
+            "--model",
+            str(voice),
+            "--output-raw",  # raw PCM output
         ]
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -157,12 +112,11 @@ class PiperTTS:
         raw_out, raw_err = await proc.communicate(input=text.encode("utf-8"))
         if proc.returncode != 0:
             raise RuntimeError(f"Piper failed: {raw_err.decode()}")
-        # piper --output-raw produces raw s16le PCM (no header)
-        return raw_out
+        # piper --output-raw produces raw s16le PCM (no header) at the voice's own
+        # rate (22050 Hz for *-medium voices); the pipeline plays 16 kHz.
+        return resample(raw_out, self._voice_sample_rate(voice), SAMPLE_RATE)
 
-    async def async_synthesize(
-        self, text: str, language: str = "en"
-    ) -> AsyncIterator[bytes]:
+    async def async_synthesize(self, text: str, language: str = "en") -> AsyncIterator[bytes]:
         """Stream raw PCM chunks from Piper."""
         pcm = await self.synthesize(text, language)
         for i in range(0, len(pcm), CHUNK_BYTES):
@@ -213,13 +167,13 @@ class EdgeTTS:
             tmp_path = f.name
 
         audio = AudioSegment.from_mp3(tmp_path)
-        audio = audio.set_frame_rate(SAMPLE_RATE).set_channels(CHANNELS).set_sample_width(SAMPLE_WIDTH)
-        Path(tmp_path).unlink(missing_ok=True)
+        audio = (
+            audio.set_frame_rate(SAMPLE_RATE).set_channels(CHANNELS).set_sample_width(SAMPLE_WIDTH)
+        )
+        Path(tmp_path).unlink(missing_ok=True)  # noqa: ASYNC240 - tiny local temp file
         return audio.raw_data  # type: ignore[return-value]
 
-    async def async_synthesize(
-        self, text: str, language: str = "en"
-    ) -> AsyncIterator[bytes]:
+    async def async_synthesize(self, text: str, language: str = "en") -> AsyncIterator[bytes]:
         """Stream raw PCM chunks from Edge-TTS."""
         pcm = await self.synthesize(text, language)
         for i in range(0, len(pcm), CHUNK_BYTES):
@@ -267,9 +221,7 @@ class TTSEngine:
         log.debug("tts_edge", lang=language, chars=len(text))
         return await self._edge.synthesize(text, language)
 
-    async def stream(
-        self, text: str, language: str = "en"
-    ) -> AsyncIterator[bytes]:
+    async def stream(self, text: str, language: str = "en") -> AsyncIterator[bytes]:
         """Yield raw PCM chunks as they become available."""
         pcm = await self.speak(text, language)
         for i in range(0, len(pcm), CHUNK_BYTES):

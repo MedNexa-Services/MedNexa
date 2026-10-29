@@ -13,10 +13,8 @@ No external services or GPU required.
 from __future__ import annotations
 
 import asyncio
-import struct
-from collections import deque
-from typing import AsyncIterator
-from unittest.mock import AsyncMock, MagicMock, patch
+from collections.abc import AsyncIterator
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -128,7 +126,7 @@ class TestPipelineGreeting:
         mock_api.append_log.assert_called()
         calls = [call.args for call in mock_api.append_log.call_args_list]
         roles = [c[1] for c in calls]
-        assert "assistant" in roles
+        assert "ASSISTANT" in roles  # backend CallRole values are uppercase
 
 
 class TestPipelineUtterance:
@@ -143,16 +141,18 @@ class TestPipelineUtterance:
     ) -> None:
         """When VAD signals speech_end, STT and agent should be called."""
         # Produce speech_start → speech_end → silence from the mock VAD
-        events_iter = iter([
-            ["speech_start"],  # first chunk
-            ["speech", "speech_end"],  # second chunk — triggers STT
-            ["silence"],
-        ])
+        events_iter = iter(
+            [
+                ["speech_start"],  # first chunk
+                ["speech", "speech_end"],  # second chunk — triggers STT
+                ["silence"],
+            ]
+        )
         mock_vad.process_chunk.side_effect = list(events_iter)
 
         chunks_to_send = [
-            _make_speech_chunk(3),   # speech_start
-            _make_speech_chunk(5),   # speech_end
+            _make_speech_chunk(3),  # speech_start
+            _make_speech_chunk(5),  # speech_end
             _make_silence_chunk(1),  # silence (stops the loop naturally)
         ]
 
@@ -206,3 +206,190 @@ class TestPipelineTimeout:
         await asyncio.wait_for(pipeline.run(endless_silence()), timeout=3.0)
         # end_call should have been called
         mock_api.end_call.assert_called_once()
+
+
+class TestUtteranceBuffering:
+    @pytest.mark.asyncio
+    async def test_utterance_keeps_every_chunk_exactly_once(
+        self,
+        mock_vad: MagicMock,
+        mock_stt: MagicMock,
+        mock_tts: MagicMock,
+        mock_api: MagicMock,
+        mock_recorder: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Chunks without a VAD event mid-speech are kept; multi-frame chunks aren't doubled."""
+        monkeypatch.setattr("telephony.pipeline.normalise_audio", lambda pcm: pcm)
+        chunks = [b"\x01\x00" * 100, b"\x02\x00" * 100, b"\x03\x00" * 1100, b"\x04\x00" * 100]
+        script = [
+            (["speech_start"], True),
+            ([], True),  # shorter than a VAD frame: no event, but still mid-utterance
+            (["speech", "speech"], True),  # two frames in one chunk
+            (["speech_end"], False),
+        ]
+
+        def process_chunk(chunk: bytes) -> list[str]:
+            events, in_speech = script.pop(0)
+            mock_vad.in_speech = in_speech
+            return events
+
+        mock_vad.process_chunk.side_effect = process_chunk
+
+        async def audio() -> AsyncIterator[bytes]:
+            for c in chunks:
+                yield c
+
+        async def send(chunk: bytes) -> None:
+            pass
+
+        pipeline = CallPipeline("sess-buf", "+911234567890", send, agent=StubAgent())
+        pipeline._processor = MagicMock(process=lambda c: c)  # pass audio through unchanged
+        await pipeline.run(audio())
+
+        transcribed = mock_stt.transcribe_bytes.call_args.args[0]
+        assert transcribed == b"".join(chunks)
+
+
+class TestBargeIn:
+    @pytest.mark.asyncio
+    async def test_caller_speech_during_playback_clears_queued_audio(
+        self,
+        mock_vad: MagicMock,
+        mock_stt: MagicMock,
+        mock_api: MagicMock,
+        mock_recorder: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Audio is sent faster than real time; the caller is still hearing the
+        greeting when they start talking, so the queued audio must be cleared."""
+
+        async def one_second_of_speech(text: str, lang: str) -> AsyncIterator[bytes]:
+            for _ in range(10):
+                yield b"\x00" * 3200  # 10 x 100 ms
+
+        tts = MagicMock()
+        tts.stream = one_second_of_speech
+        monkeypatch.setattr("telephony.pipeline.TTSEngine", lambda: tts)
+
+        events = [["speech_start"], ["speech"]]
+
+        def process_chunk(chunk: bytes) -> list[str]:
+            mock_vad.in_speech = True
+            return events.pop(0) if events else ["speech"]
+
+        mock_vad.process_chunk.side_effect = process_chunk
+
+        async def caller_interrupts() -> AsyncIterator[bytes]:
+            yield b"\x01\x00" * 320
+            yield b"\x01\x00" * 320
+
+        clear = AsyncMock()
+
+        async def send(chunk: bytes) -> None:
+            pass
+
+        pipeline = CallPipeline(
+            "sess-barge", "+911234567890", send, clear_audio=clear, agent=StubAgent()
+        )
+        await pipeline.run(caller_interrupts())
+
+        clear.assert_awaited_once()  # once, not again for the second speech chunk
+
+    @pytest.mark.asyncio
+    async def test_no_clear_when_nothing_is_playing(
+        self,
+        mock_vad: MagicMock,
+        mock_stt: MagicMock,
+        mock_tts: MagicMock,
+        mock_api: MagicMock,
+        mock_recorder: MagicMock,
+    ) -> None:
+        mock_vad.process_chunk.side_effect = lambda chunk: ["speech_start"]
+        clear = AsyncMock()
+
+        async def caller_speaks() -> AsyncIterator[bytes]:
+            await asyncio.sleep(0.05)  # the tiny greeting (100 bytes) has finished playing
+            yield b"\x01\x00" * 320
+
+        async def send(chunk: bytes) -> None:
+            pass
+
+        pipeline = CallPipeline(
+            "sess-quiet", "+911234567890", send, clear_audio=clear, agent=StubAgent()
+        )
+        await pipeline.run(caller_speaks())
+        clear.assert_not_awaited()
+
+
+class TestCallEnd:
+    @pytest.mark.asyncio
+    async def test_end_call_reports_the_agents_outcome(
+        self,
+        mock_vad: MagicMock,
+        mock_stt: MagicMock,
+        mock_tts: MagicMock,
+        mock_api: MagicMock,
+        mock_recorder: MagicMock,
+    ) -> None:
+        agent = StubAgent()
+        agent.call_outcome = "BOOKED"  # type: ignore[attr-defined]
+        agent.escalated = True  # type: ignore[attr-defined]
+
+        async def no_audio() -> AsyncIterator[bytes]:
+            return
+            yield  # type: ignore[misc]
+
+        async def send(chunk: bytes) -> None:
+            pass
+
+        await CallPipeline("sess-end", "+911234567890", send, agent=agent).run(no_audio())
+        kwargs = mock_api.end_call.await_args.kwargs
+        assert kwargs["outcome"] == "BOOKED"
+        assert kwargs["escalated_to_human"] is True
+
+    @pytest.mark.asyncio
+    async def test_agents_without_an_outcome_end_as_other(
+        self,
+        mock_vad: MagicMock,
+        mock_stt: MagicMock,
+        mock_tts: MagicMock,
+        mock_api: MagicMock,
+        mock_recorder: MagicMock,
+    ) -> None:
+        async def no_audio() -> AsyncIterator[bytes]:
+            return
+            yield  # type: ignore[misc]
+
+        async def send(chunk: bytes) -> None:
+            pass
+
+        await CallPipeline("sess-end2", "+911234567890", send, agent=StubAgent()).run(no_audio())
+        assert mock_api.end_call.await_args.kwargs["outcome"] == "OTHER"
+
+
+@pytest.mark.asyncio
+async def test_backend_client_sends_backend_role_values() -> None:
+    from telephony.api_client import BackendClient
+
+    client = BackendClient(base_url="http://test")
+    client._post = AsyncMock()  # type: ignore[method-assign]
+    await client.append_log("s1", "assistant", "hello")
+    assert client._post.await_args.args[1]["role"] == "ASSISTANT"
+    await client.aclose()
+
+
+@pytest.mark.parametrize(
+    "reply, ends_call",
+    [
+        ("Thank you for calling, goodbye!", True),
+        ("Okay, bye.", True),
+        ("धन्यवाद, नमस्ते!", True),
+        ("धन्यवाद, आपकी अपॉइंटमेंट बुक हो गई है। और कुछ?", False),
+        ("Take care. Your token number is 3. Anything else?", False),
+        ("Thank you for calling MedNexa. How can I help?", False),
+        ("Dr. Sharma is nearby in room 4.", False),
+    ],
+)
+def test_farewell_detection(reply: str, ends_call: bool) -> None:
+    assert CallPipeline._is_farewell(reply) is ends_call

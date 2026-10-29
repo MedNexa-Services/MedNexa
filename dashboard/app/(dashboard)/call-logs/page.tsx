@@ -123,7 +123,7 @@ export default function CallLogsPage() {
     fetchCalls();
   }, [fetchCalls]);
 
-  const handleFilterChange = (setter: (val: any) => void, val: any) => {
+  const handleFilterChange = <T,>(setter: (val: T) => void, val: T) => {
     setter(val);
     setPageIndex(0);
   };

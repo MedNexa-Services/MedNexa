@@ -27,15 +27,13 @@ caller's audio stream (Twilio / Asterisk bridge provides this).
 from __future__ import annotations
 
 import asyncio
+import re
 import time
-from collections.abc import AsyncIterator, Callable, Awaitable
-from typing import Any
+from collections.abc import AsyncIterator, Awaitable, Callable
 
-import structlog
-
-from telephony.agent_interface import AgentInterface, StubAgent
+from telephony.agent_interface import AgentInterface, create_agent
 from telephony.api_client import BackendClient
-from telephony.audio_utils import AudioProcessor
+from telephony.audio_utils import AudioProcessor, normalise_audio
 from telephony.config import get_settings
 from telephony.logging_setup import get_logger
 from telephony.recording import CallRecorder
@@ -46,6 +44,13 @@ from telephony.vad import SileroVAD
 log = get_logger("pipeline")
 
 SendAudioFn = Callable[[bytes], Awaitable[None]]
+ClearAudioFn = Callable[[], Awaitable[None]]
+
+# Pipeline audio: 16 kHz mono int16 -> 32000 bytes per second of playback.
+PCM_BYTES_PER_SECOND = 16000 * 2
+
+# Closing phrases (Part 2's agent says these only in its final reply).
+_FAREWELL = re.compile(r"\bgood\s?-?bye\b|\bbye\b|अलविदा|धन्यवाद[\s,।!]*नमस्ते", re.IGNORECASE)
 
 # Maximum buffer for one utterance (prevents runaway memory if VAD misses end)
 MAX_UTTERANCE_BYTES = 16000 * 2 * 30  # 30 seconds of 16 kHz int16
@@ -62,6 +67,9 @@ class CallPipeline:
         E.164 phone number of the caller (e.g. "+919876543210").
     send_audio:
         Async function that sends a raw PCM chunk to the caller.
+    clear_audio:
+        Optional async function that discards audio already queued on the
+        caller's side (Twilio's "clear"), used when the caller barges in.
     agent:
         MedNexaAgent or StubAgent instance.
     """
@@ -72,12 +80,14 @@ class CallPipeline:
         caller_phone: str,
         send_audio: SendAudioFn,
         *,
+        clear_audio: ClearAudioFn | None = None,
         agent: AgentInterface | None = None,
     ) -> None:
         cfg = get_settings()
         self.session_id = session_id
         self.caller_phone = caller_phone
         self._send_audio = send_audio
+        self._clear_audio = clear_audio
         self._cfg = cfg
 
         # Core components
@@ -85,15 +95,16 @@ class CallPipeline:
         self._stt = FasterWhisperSTT()
         self._tts = TTSEngine()
         self._processor = AudioProcessor()
-        self._agent: AgentInterface = agent or StubAgent(caller_phone, cfg.hospital_id)
+        self._agent: AgentInterface = agent or create_agent(caller_phone, cfg.hospital_id)
         self._api = BackendClient()
         self._recorder = CallRecorder(session_id)
 
         # State
         self._language: str = "en"
         self._utterance_buf: bytearray = bytearray()
-        self._tts_playing = asyncio.Event()
-        self._tts_playing.clear()  # not playing initially
+        # Audio is sent faster than real time and buffered by the telephony side,
+        # so "playing" lasts until the caller has actually heard it all.
+        self._playback_until: float = 0.0
         self._barge_in_triggered = asyncio.Event()
         self._call_active = True
         self._start_time: float = 0.0
@@ -114,17 +125,17 @@ class CallPipeline:
             # Play consent prompt if recording is enabled
             if self._recorder.enabled:
                 await self._speak(self._recorder.consent_prompt(self._language))
-                await self._log("assistant", self._recorder.consent_prompt(self._language))
+                await self._log("ASSISTANT", self._recorder.consent_prompt(self._language))
 
             # Play opening greeting
             greeting = await self._agent.get_greeting()
             await self._speak(greeting)
-            await self._log("assistant", greeting)
+            await self._log("ASSISTANT", greeting)
 
             try:
                 async with asyncio.timeout(self._cfg.call_timeout_seconds):
                     await self._process_stream(audio_stream)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 log.warning("call_timeout", session_id=self.session_id)
                 timeout_msg = (
                     "I'm sorry, the call has exceeded the maximum duration. Goodbye!"
@@ -163,25 +174,25 @@ class CallPipeline:
 
             # Run VAD
             events = self._vad.process_chunk(chunk)
+            speaking = "speech_start" in events or "speech" in events
+            utterance_ends = "speech_end" in events
 
-            for event in events:
-                if event in ("speech_start", "speech"):
-                    self._last_speech_time = time.monotonic()
+            if speaking:
+                self._last_speech_time = time.monotonic()
 
-                    # Barge-in: interrupt TTS if currently speaking
-                    if self._cfg.barge_in_enabled and self._tts_playing.is_set():
-                        self._barge_in_triggered.set()
-                        log.debug("barge_in", session_id=self.session_id)
+                # Barge-in: interrupt TTS if the caller is still hearing it
+                if self._cfg.barge_in_enabled and self._is_playing():
+                    await self._interrupt_playback()
 
-                    # Accumulate audio for STT
-                    self._utterance_buf.extend(chunk)
-                    if len(self._utterance_buf) > MAX_UTTERANCE_BYTES:
-                        # Safety valve — force process to prevent runaway memory
-                        await self._process_utterance()
+            # Keep each chunk once while an utterance is open. VAD works in 32 ms
+            # frames, so a short chunk can carry no event at all mid-utterance,
+            # and a long one can carry several.
+            if speaking or utterance_ends or self._vad.in_speech:
+                self._utterance_buf.extend(chunk)
 
-                elif event == "speech_end":
-                    self._utterance_buf.extend(chunk)
-                    await self._process_utterance()
+            if utterance_ends or len(self._utterance_buf) > MAX_UTTERANCE_BYTES:
+                # (the size check is a safety valve against runaway memory)
+                await self._process_utterance()
 
     # ── utterance handling ────────────────────────────────────────────────────
 
@@ -196,7 +207,12 @@ class CallPipeline:
 
         # STT
         t0 = time.monotonic()
-        result = self._stt.transcribe_bytes(pcm, language_hint=self._language)
+        # Level the whole utterance (not per chunk) so quiet lines transcribe well.
+        pcm = normalise_audio(pcm)
+
+        # Whisper is blocking: run it off the event loop so other calls keep flowing.
+        # No language hint, so each utterance's language is detected afresh.
+        result = await asyncio.to_thread(self._stt.transcribe_bytes, pcm)
         stt_ms = int((time.monotonic() - t0) * 1000)
 
         # Update detected language
@@ -229,7 +245,7 @@ class CallPipeline:
             return
 
         # Log the caller's turn
-        await self._log("user", text)
+        await self._log("USER", text)
 
         # Agent
         t1 = time.monotonic()
@@ -244,7 +260,7 @@ class CallPipeline:
         )
 
         # Log the agent's turn
-        await self._log("assistant", response)
+        await self._log("ASSISTANT", response)
 
         # TTS
         await self._speak(response, language=self._language)
@@ -255,10 +271,20 @@ class CallPipeline:
 
     # ── TTS playback ──────────────────────────────────────────────────────────
 
+    def _is_playing(self) -> bool:
+        return time.monotonic() < self._playback_until
+
+    async def _interrupt_playback(self) -> None:
+        """Stop the current reply: no more chunks, and drop what is already queued."""
+        self._barge_in_triggered.set()
+        self._playback_until = 0.0
+        log.debug("barge_in", session_id=self.session_id)
+        if self._clear_audio is not None:
+            await self._clear_audio()
+
     async def _speak(self, text: str, language: str | None = None) -> None:
         """Synthesise text and stream audio to the caller."""
         lang = language or self._language
-        self._tts_playing.set()
         self._barge_in_triggered.clear()
 
         t0 = time.monotonic()
@@ -268,10 +294,11 @@ class CallPipeline:
                     log.debug("tts_interrupted", session_id=self.session_id)
                     break
                 await self._send_audio(chunk)
+                start = max(self._playback_until, time.monotonic())
+                self._playback_until = start + len(chunk) / PCM_BYTES_PER_SECOND
         finally:
             tts_ms = int((time.monotonic() - t0) * 1000)
             log.debug("tts_done", tts_ms=tts_ms, lang=lang)
-            self._tts_playing.clear()
 
     # ── logging ───────────────────────────────────────────────────────────────
 
@@ -283,35 +310,27 @@ class CallPipeline:
 
     async def _end_call(self) -> None:
         """Finalise session in the backend and clean up resources."""
-        summary = await self._agent.get_summary()
-        outcome = getattr(self._agent, "call_outcome", "OTHER") or "OTHER"
-        escalated = bool(getattr(self._agent, "escalated", False))
-        lang = getattr(self._agent, "language", self._language) or self._language
-
+        try:
+            summary = await self._agent.get_summary()
+        except Exception:
+            log.exception("agent_summary_failed", session_id=self.session_id)
+            summary = None
+        # Part 2's agent reports a backend CallOutcome and whether it handed the
+        # caller to staff; other agents (e.g. the stub) fall back to OTHER.
         await self._api.end_call(
             self.session_id,
-            outcome=outcome,
+            outcome=getattr(self._agent, "call_outcome", "OTHER"),
             summary=summary,
-            language_detected=lang,
-            escalated_to_human=escalated,
+            language_detected=self._language,
+            escalated_to_human=bool(getattr(self._agent, "escalated", False)),
         )
         await self._api.aclose()
-        log.info(
-            "pipeline_done",
-            session_id=self.session_id,
-            outcome=outcome,
-            escalated=escalated,
-        )
+        log.info("pipeline_done", session_id=self.session_id)
 
     # ── helpers ───────────────────────────────────────────────────────────────
 
     @staticmethod
     def _is_farewell(text: str) -> bool:
-        """Heuristic: did the agent say goodbye?"""
-        farewells = {
-            "goodbye", "bye", "have a great day", "have a nice day",
-            "take care", "thank you for calling",
-            "नमस्ते", "धन्यवाद", "अलविदा",
-        }
-        lower = text.lower()
-        return any(f in lower for f in farewells)
+        """Did the agent close the call? Only explicit closing phrases count: words
+        like "धन्यवाद" (thank you) or "take care" also occur mid-conversation."""
+        return bool(_FAREWELL.search(text))

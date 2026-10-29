@@ -17,9 +17,7 @@ Usage::
 
 from __future__ import annotations
 
-import time
-from collections import deque
-from typing import Deque, Literal
+from typing import Literal
 
 import numpy as np
 
@@ -44,11 +42,11 @@ class SileroVAD:
     across all concurrent calls (saves ~300 ms startup per call).
     """
 
-    _model: "object | None" = None  # silero model (shared)
-    _utils: "object | None" = None
+    _model: object | None = None  # silero model (shared)
+    _utils: object | None = None
 
     @classmethod
-    def _load_model(cls) -> tuple["object", "object"]:
+    def _load_model(cls) -> tuple[object, object]:
         if cls._model is None:
             import torch  # type: ignore[import-untyped]
 
@@ -79,7 +77,7 @@ class SileroVAD:
         self._speech_start_ms: float = 0.0
         self._silence_start_ms: float = 0.0
         self._elapsed_ms: float = 0.0  # tracks position in stream
-        self._leftover: bytes = b""   # incomplete frame buffer
+        self._leftover: bytes = b""  # incomplete frame buffer
 
     def _ms_per_frame(self) -> float:
         return (FRAME_SAMPLES / self._sample_rate) * 1000  # 32 ms

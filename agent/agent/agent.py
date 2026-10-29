@@ -77,7 +77,12 @@ class MedNexaAgent:
     # --- AgentInterface -------------------------------------------------------------
 
     async def get_greeting(self) -> str:
-        text = greeting(await self._hospital_context())
+        try:
+            hospital: HospitalContext | None = await self._hospital_context()
+        except Exception:  # never fail the call before it starts
+            logger.exception("hospital_context_failed hospital_id=%s", self.ctx.hospital_id)
+            hospital = None
+        text = greeting(hospital)
         self._pending.append(AIMessage(content=text))
         return text
 

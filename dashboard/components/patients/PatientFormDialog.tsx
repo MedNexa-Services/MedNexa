@@ -82,7 +82,6 @@ export function PatientFormDialog({
     try {
       if (patient) {
         const payload: PatientUpdate = {
-          name: name.trim(),
           age: age ? parseInt(age, 10) : null,
           gender: gender ? (gender as Gender) : null,
           email: email.trim() || null,
@@ -149,6 +148,7 @@ export function PatientFormDialog({
                 placeholder="e.g. Ramesh Kumar"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
+                disabled={!!patient} // name + phone identify the patient and can't be edited
                 required
               />
             </div>

@@ -1,6 +1,7 @@
 """Full agent turns: real graph, tools and database, with a scripted LLM."""
 
 import json
+import uuid
 from collections.abc import Sequence
 
 import pytest
@@ -205,3 +206,12 @@ def test_recent_history_keeps_latest_caller_turn(limit: int) -> None:
         ToolMessage(content="{}", tool_call_id="1"),
     ]
     assert [m.content for m in recent_history(messages, limit)] == ["only"]
+
+
+async def test_greeting_survives_a_missing_hospital(seed, session_factory) -> None:
+    agent, _ = make_agent(seed, session_factory, [])
+    agent.ctx.hospital_id = uuid.uuid4()  # e.g. a misconfigured hospital id
+    greeting = await agent.get_greeting()
+    assert greeting.startswith("Namaste!") and "हिंदी" in greeting
+    # The next turn can't build a prompt either, so the caller is handed to staff.
+    assert "connect you to our staff" in await agent.process("Hello", "en")

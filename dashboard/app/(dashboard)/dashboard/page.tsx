@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { listAppointments, listDoctors, type AppointmentOut, type DoctorOut } from "@/lib/api";
 import { useHospital } from "@/contexts/HospitalContext";
+import { addDays, isoWeekday, todayIn } from "@/lib/dates";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,36 +35,35 @@ import {
 import { toast } from "sonner";
 
 export default function DashboardOverviewPage() {
-  const { hospital } = useHospital();
+  const { hospital, hospitalId } = useHospital();
 
-  // Selected date state (defaults to hospital-local today or 2026-10-25)
-  const getTodayISO = () => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, "0");
-    const day = String(now.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
-  };
-
-  const [selectedDate, setSelectedDate] = React.useState<string>(getTodayISO);
+  // Selected date: null = today in the hospital's timezone, otherwise a picked date
+  const [pickedDate, setPickedDate] = React.useState<string | null>(null);
+  const today = todayIn(hospital?.timezone);
+  const tomorrow = addDays(today, 1);
+  const selectedDate = pickedDate ?? today;
+  const setSelectedDate = setPickedDate;
   const [appointments, setAppointments] = React.useState<AppointmentOut[]>([]);
   const [doctors, setDoctors] = React.useState<DoctorOut[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isRefreshing, setIsRefreshing] = React.useState(false);
   const [searchQuery, setSearchQuery] = React.useState("");
   const [lastUpdated, setLastUpdated] = React.useState<Date>(new Date());
+  const [totalAppointments, setTotalAppointments] = React.useState(0);
 
   // Fetch appointments and doctors for the selected date
   const loadData = React.useCallback(
     async (showToast = false) => {
+      if (!hospitalId) return; // never query across hospitals while the hospital is loading
       if (showToast) setIsRefreshing(true);
       try {
         const [apptsRes, docsRes] = await Promise.all([
-          listAppointments({ date: selectedDate, limit: 50 }),
-          listDoctors({ limit: 50, include_inactive: false }),
+          listAppointments({ hospital_id: hospitalId, date: selectedDate, limit: 200 }),
+          listDoctors({ hospital_id: hospitalId, limit: 200, include_inactive: false }),
         ]);
 
         setAppointments(apptsRes.items || []);
+        setTotalAppointments(apptsRes.total ?? apptsRes.items?.length ?? 0);
         setDoctors(docsRes.items || []);
         setLastUpdated(new Date());
 
@@ -78,7 +78,7 @@ export default function DashboardOverviewPage() {
         setIsRefreshing(false);
       }
     },
-    [selectedDate]
+    [selectedDate, hospitalId]
   );
 
   // Initial fetch and on selectedDate change
@@ -98,12 +98,11 @@ export default function DashboardOverviewPage() {
 
   // Compute ISO Weekday for selected date (1 = Monday ... 7 = Sunday)
   const dateObj = new Date(selectedDate + "T00:00:00");
-  const jsDay = dateObj.getDay(); // 0 is Sun, 1 is Mon
-  const isoWeekday = jsDay === 0 ? 7 : jsDay;
+  const weekday = isoWeekday(selectedDate);
 
   // Active doctors working on this specific weekday
   const activeDoctorsToday = doctors.filter((doc) =>
-    doc.available_days?.includes(isoWeekday)
+    doc.available_days?.includes(weekday)
   );
 
   // Total daily slot capacity for today across working doctors
@@ -228,9 +227,9 @@ export default function DashboardOverviewPage() {
           <div className="flex items-center bg-card border border-border rounded-lg p-1 text-xs">
             <button
               type="button"
-              onClick={() => setSelectedDate(getTodayISO())}
+              onClick={() => setSelectedDate(today)}
               className={`px-3 py-1.5 rounded-md font-medium transition-colors cursor-pointer ${
-                selectedDate === getTodayISO()
+                selectedDate === today
                   ? "bg-blue-600 text-white shadow-xs"
                   : "text-muted-foreground hover:text-foreground hover:bg-muted"
               }`}
@@ -239,25 +238,14 @@ export default function DashboardOverviewPage() {
             </button>
             <button
               type="button"
-              onClick={() => setSelectedDate("2026-10-26")}
+              onClick={() => setSelectedDate(tomorrow)}
               className={`px-3 py-1.5 rounded-md font-medium transition-colors cursor-pointer ${
-                selectedDate === "2026-10-26"
+                selectedDate === tomorrow
                   ? "bg-blue-600 text-white shadow-xs"
                   : "text-muted-foreground hover:text-foreground hover:bg-muted"
               }`}
             >
-              Oct 26 (Seeded)
-            </button>
-            <button
-              type="button"
-              onClick={() => setSelectedDate("2026-10-27")}
-              className={`px-3 py-1.5 rounded-md font-medium transition-colors cursor-pointer ${
-                selectedDate === "2026-10-27"
-                  ? "bg-blue-600 text-white shadow-xs"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
-              }`}
-            >
-              Oct 27
+              Tomorrow
             </button>
           </div>
 
@@ -383,6 +371,8 @@ export default function DashboardOverviewPage() {
               </h2>
               <p className="text-xs text-muted-foreground">
                 Showing scheduled patient consultations for {selectedDate}
+                {totalAppointments > appointments.length &&
+                  ` (first ${appointments.length} of ${totalAppointments}; counts below cover only these)`}
               </p>
             </div>
 
@@ -432,20 +422,18 @@ export default function DashboardOverviewPage() {
                   <p className="text-xs text-muted-foreground max-w-sm mx-auto">
                     {searchQuery
                       ? "No records matched your search query. Try clearing the filter."
-                      : selectedDate === getTodayISO()
-                      ? "The hospital seed database scheduled consultations for tomorrow (Monday, Oct 26)."
-                      : "There are no booked patient slots for this specific date."}
+                      : "There are no booked patient slots for this date."}
                   </p>
                 </div>
 
                 <div className="flex items-center justify-center gap-3 pt-2">
-                  {selectedDate !== "2026-10-26" && (
+                  {selectedDate !== tomorrow && (
                     <Button
                       size="sm"
-                      onClick={() => setSelectedDate("2026-10-26")}
+                      onClick={() => setSelectedDate(tomorrow)}
                       className="gap-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
                     >
-                      <span>View Oct 26 OPD (Seeded Data)</span>
+                      <span>View tomorrow</span>
                       <ArrowRight className="w-3.5 h-3.5" />
                     </Button>
                   )}

@@ -1,11 +1,11 @@
 name: Telephony CI
 
+# Runs when the voice pipeline changes, or when the backend code its call-session
+# API depends on changes.
 on:
   push:
     paths:
       - "telephony/**"
-      - "agent/**"
-      - "backend/**"
   pull_request:
     paths:
       - "telephony/**"
@@ -23,27 +23,31 @@ defaults:
     working-directory: telephony
 
 jobs:
-  quality:
+  check:
     name: Lint & tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install system audio libraries
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg libsndfile1
-
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
 
+      # The tests mock Whisper, Silero (torch) and the TTS engines, so the large
+      # ML packages are skipped; everything the code imports at module level is installed.
       - name: Install dependencies
-        run: |
-          uv venv
-          uv pip install -e ../backend -e ../agent -e ".[dev]"
+        run: >
+          uv sync --locked
+          --no-install-package torch
+          --no-install-package torchaudio
+          --no-install-package faster-whisper
 
       - name: Ruff lint
-        run: uv run ruff check . --exit-zero
+        run: uv run --no-sync ruff check --output-format=github .
 
-      - name: Run unit tests
-        run: uv run pytest
+      - name: Ruff format
+        run: uv run --no-sync ruff format --check .
+
+      - name: Tests
+        run: uv run --no-sync pytest -q

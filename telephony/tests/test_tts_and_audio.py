@@ -2,36 +2,30 @@
 
 from __future__ import annotations
 
-import struct
-from unittest.mock import AsyncMock, MagicMock, patch
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from telephony.tts import (
     CHUNK_BYTES,
-    EdgeTTS,
     PiperTTS,
     TTSEngine,
-    pcm_16k_to_ulaw_8k,
-    ulaw_to_linear,
-    upsample_8k_to_16k,
 )
-
 
 # ── TTSEngine ─────────────────────────────────────────────────────────────────
 
 
 class TestTTSEngine:
-    def test_empty_text_returns_empty(self) -> None:
+    @pytest.mark.asyncio
+    async def test_empty_text_returns_empty(self) -> None:
         engine = TTSEngine.__new__(TTSEngine)
         engine._prefer_piper = False
         engine._piper = MagicMock()
         engine._edge = MagicMock()
         engine._piper_ok = False
 
-        import asyncio
-        result = asyncio.run(engine.speak("", "en"))
-        assert result == b""
+        assert await engine.speak("", "en") == b""
 
     @pytest.mark.asyncio
     async def test_falls_back_to_edge_when_piper_unavailable(self) -> None:
@@ -96,34 +90,7 @@ class TestTTSEngine:
         assert all(len(c) == CHUNK_BYTES for c in chunks)
 
 
-# ── Audio utils (codec) ────────────────────────────────────────────────────────
-
-
-class TestTwilioCodecs:
-    def test_ulaw_to_linear_roundtrip_approx(self) -> None:
-        """μ-law decode then encode should give back approximate original."""
-        # Import the encoder from twilio_handler
-        from telephony.twilio_handler import ulaw_to_linear, pcm_16k_to_ulaw_8k, upsample_8k_to_16k
-
-        # Create a simple 8 kHz test signal (100 bytes = 50 samples)
-        samples = [1000, -1000, 2000, -2000] * 12  # 48 samples
-        ulaw_bytes = bytes([
-            0b00110101 if s > 0 else 0b10110101 for s in samples
-        ])  # rough values — just test non-crash
-        linear = ulaw_to_linear(ulaw_bytes)
-        assert len(linear) == len(ulaw_bytes) * 2
-
-    def test_upsample_doubles_size(self) -> None:
-        from telephony.twilio_handler import upsample_8k_to_16k
-        pcm_8k = struct.pack("<10h", *range(10))
-        pcm_16k = upsample_8k_to_16k(pcm_8k)
-        assert len(pcm_16k) == len(pcm_8k) * 2
-
-    def test_pcm_16k_to_ulaw_8k_halves_size(self) -> None:
-        from telephony.twilio_handler import pcm_16k_to_ulaw_8k
-        pcm_16k = struct.pack("<20h", *([100] * 20))
-        ulaw = pcm_16k_to_ulaw_8k(pcm_16k)
-        assert len(ulaw) == 10  # 20 samples → 10 samples
+# The μ-law codec is tested in tests/test_audio_codec.py.
 
 
 # ── Audio quality ──────────────────────────────────────────────────────────────
@@ -132,11 +99,13 @@ class TestTwilioCodecs:
 class TestAudioUtils:
     def test_normalise_silence_unchanged(self) -> None:
         from telephony.audio_utils import normalise_audio
+
         silent = b"\x00" * 3200
         assert normalise_audio(silent) == silent
 
     def test_normalise_amplifies_quiet_signal(self) -> None:
         import numpy as np
+
         from telephony.audio_utils import normalise_audio, pcm_to_float
 
         # Very quiet signal
@@ -150,6 +119,7 @@ class TestAudioUtils:
 
     def test_high_pass_returns_same_length(self) -> None:
         import numpy as np
+
         from telephony.audio_utils import apply_high_pass
 
         samples = (np.random.randn(3200) * 1000).astype(np.int16)
@@ -159,12 +129,75 @@ class TestAudioUtils:
 
     def test_detect_silence_on_zeros(self) -> None:
         from telephony.audio_utils import detect_silence
+
         assert detect_silence(b"\x00" * 3200) is True
 
     def test_detect_silence_on_tone(self) -> None:
         import numpy as np
+
         from telephony.audio_utils import detect_silence
 
         t = np.linspace(0, 1, 16000)
         samples = (np.sin(2 * 3.14159 * 440 * t) * 30000).astype(np.int16)
         assert detect_silence(samples.tobytes()) is False
+
+
+class TestPiperSampleRate:
+    @pytest.mark.asyncio
+    async def test_piper_output_is_resampled_to_16k(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Piper voices speak at their own rate (22050 Hz for *-medium voices)."""
+        import json
+
+        import telephony.config as cfg_module
+
+        (tmp_path / "voice.onnx").write_bytes(b"")
+        (tmp_path / "voice.onnx.json").write_text(json.dumps({"audio": {"sample_rate": 22050}}))
+        settings = cfg_module.get_settings()
+        monkeypatch.setattr(settings, "piper_models_dir", str(tmp_path))
+        monkeypatch.setattr(settings, "piper_voice_en", "voice")
+
+        one_second_native = b"\x10\x00" * 22050
+
+        class FakeProcess:
+            returncode = 0
+
+            async def communicate(self, input: bytes) -> tuple[bytes, bytes]:
+                return one_second_native, b""
+
+        async def fake_exec(*args: object, **kwargs: object) -> FakeProcess:
+            return FakeProcess()
+
+        monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
+        pcm = await PiperTTS().synthesize("Hello", "en")
+        assert len(pcm) == 16000 * 2  # still one second, now at 16 kHz
+
+
+class TestAudioProcessorStreaming:
+    def test_high_pass_is_continuous_across_chunks(self) -> None:
+        """Filtering a stream chunk by chunk must equal filtering it in one go."""
+        import numpy as np
+
+        from telephony.audio_utils import AudioProcessor
+
+        signal = (np.sin(np.arange(3200) / 5) * 8000 + 3000).astype(np.int16).tobytes()
+        whole = AudioProcessor().process(signal)
+        streamed = AudioProcessor()
+        chunks = b"".join(streamed.process(signal[i : i + 640]) for i in range(0, len(signal), 640))
+        assert (
+            np.abs(
+                np.frombuffer(chunks, np.int16).astype(int) - np.frombuffer(whole, np.int16)
+            ).max()
+            <= 1
+        )
+
+    def test_quiet_line_noise_is_not_boosted(self) -> None:
+        import numpy as np
+
+        from telephony.audio_utils import AudioProcessor
+
+        rng = np.random.default_rng(0)
+        hiss = (rng.normal(0, 30, 320)).astype(np.int16).tobytes()  # ~-60 dBFS noise
+        out = np.frombuffer(AudioProcessor().process(hiss), np.int16)
+        assert np.abs(out).max() < 200  # per-chunk normalisation made this ~3000
