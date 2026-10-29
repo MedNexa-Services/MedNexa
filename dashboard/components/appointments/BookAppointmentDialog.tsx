@@ -25,6 +25,8 @@ import {
   type Gender,
 } from "@/lib/api";
 import { toast } from "sonner";
+import { useHospital } from "@/contexts/HospitalContext";
+import { todayIn } from "@/lib/dates";
 import {
   Calendar,
   Clock,
@@ -63,9 +65,9 @@ export function BookAppointmentDialog({
 
   // Step 1: Doctor & Slot selection
   const [selectedDoctorId, setSelectedDoctorId] = React.useState<string>(defaultDoctorId || "");
-  const [selectedDate, setSelectedDate] = React.useState<string>(
-    defaultDate || new Date().toISOString().split("T")[0]
-  );
+  const { hospitalId, hospital } = useHospital();
+  const today = todayIn(hospital?.timezone);
+  const [selectedDate, setSelectedDate] = React.useState<string>(defaultDate || today);
   const [slots, setSlots] = React.useState<SlotOut[]>([]);
   const [loadingSlots, setLoadingSlots] = React.useState(false);
   const [selectedSlot, setSelectedSlot] = React.useState<string>("");
@@ -88,7 +90,7 @@ export function BookAppointmentDialog({
       setStep(1);
       setConfirmation(null);
       setSelectedDoctorId(defaultDoctorId || "");
-      setSelectedDate(defaultDate || new Date().toISOString().split("T")[0]);
+      setSelectedDate(defaultDate || today);
       setSelectedSlot("");
       setPatientName("");
       setPatientPhone("+91");
@@ -100,7 +102,11 @@ export function BookAppointmentDialog({
       async function fetchDoctors() {
         setLoadingDoctors(true);
         try {
-          const res = await listDoctors({ include_inactive: false, limit: 100 });
+          const res = await listDoctors({
+            hospital_id: hospitalId,
+            include_inactive: false,
+            limit: 100,
+          });
           setDoctors(res.items);
           if (!defaultDoctorId && res.items.length > 0) {
             setSelectedDoctorId(res.items[0].id);
@@ -114,7 +120,7 @@ export function BookAppointmentDialog({
       }
       fetchDoctors();
     }
-  }, [open, defaultDate, defaultDoctorId]);
+  }, [open, defaultDate, defaultDoctorId, hospitalId, today]);
 
   // Load slots when doctor or date changes
   React.useEffect(() => {
