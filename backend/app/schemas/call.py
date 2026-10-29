@@ -1,15 +1,33 @@
 import uuid
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import AfterValidator, BaseModel, Field
 
+from app.core.normalize import normalize_phone
 from app.models.enums import CallOutcome, CallRole
-from app.schemas.common import ORMModel, Phone
+from app.schemas.common import ORMModel
+
+ANONYMOUS_CALLER = "anonymous"
+
+
+def _caller_id(value: str) -> str:
+    """Normalized caller number, or 'anonymous' when the number is withheld or invalid.
+
+    Calls from hidden numbers must still be answered and logged.
+    """
+    try:
+        return normalize_phone(value)
+    except ValueError:
+        return ANONYMOUS_CALLER
+
+
+CallerId = Annotated[str, AfterValidator(_caller_id)]
 
 
 class CallSessionCreate(BaseModel):
     hospital_id: uuid.UUID
-    caller_phone: Phone
+    caller_phone: CallerId
     language_detected: str | None = Field(default=None, max_length=10)
 
 
