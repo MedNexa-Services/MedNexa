@@ -1,16 +1,26 @@
+# MedNexa: full stack (Part 5, task 5.1).
+#
+#   cp .env.example .env     # then fill in the required secrets (see the file)
+#   docker compose up --build -d
+#
+# Only the dashboard (3001) and the telephony webhook (8001) are meant to be reached from
+# other machines; the database and the API are bound to localhost, and the LLM server is
+# internal. Put an HTTPS reverse proxy (Caddy/Nginx) in front of 3001 and 8001 in production.
+
+# The database URL, defined once (the password is required).
+x-database-url: &database-url postgresql+asyncpg://${POSTGRES_USER:-mednexa}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-mednexa}
+
 services:
-  # ────────────────────────────────────────────────────────────────────────────
-  # Data Layer
-  # ────────────────────────────────────────────────────────────────────────────
+  # ── Data layer ──────────────────────────────────────────────────────────────
   db:
     image: postgres:16-alpine
     container_name: mednexa-db
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-mednexa}
       POSTGRES_USER: ${POSTGRES_USER:-mednexa}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mednexa_secret}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     ports:
-      - "5434:5432"
+      - "127.0.0.1:5434:5432" # for local tools only; remove to keep the database internal
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -22,33 +32,15 @@ services:
     networks:
       - mednexa-net
 
-  redis:
-    image: redis:7-alpine
-    container_name: mednexa-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redisdata:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    restart: unless-stopped
-    networks:
-      - mednexa-net
-
-  # ────────────────────────────────────────────────────────────────────────────
-  # Database Migration Runner (Ephemeral Init Container - Task 5.1)
-  # ────────────────────────────────────────────────────────────────────────────
+  # Applies database migrations, then exits. Sample data is NOT loaded here (see `seed`).
   migration:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: mednexa-migration
-    command: ["sh", "-c", "alembic upgrade head && python -m scripts.seed"]
+    command: ["alembic", "upgrade", "head"]
     environment:
-      MEDNEXA_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mednexa}:${POSTGRES_PASSWORD:-mednexa_secret}@db:5432/${POSTGRES_DB:-mednexa}
+      MEDNEXA_DATABASE_URL: *database-url
     depends_on:
       db:
         condition: service_healthy
@@ -56,33 +48,51 @@ services:
       - mednexa-net
     restart: "no"
 
-  # ────────────────────────────────────────────────────────────────────────────
-  # Application Services (Part 1 Backend API)
-  # ────────────────────────────────────────────────────────────────────────────
+  # Optional sample hospital, doctors and appointments for trying the system out:
+  #   docker compose --profile demo run --rm seed
+  seed:
+    profiles: ["demo"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["python", "-m", "scripts.seed"]
+    environment:
+      MEDNEXA_DATABASE_URL: *database-url
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+    networks:
+      - mednexa-net
+
+  # ── Backend API (Part 1) ────────────────────────────────────────────────────
   api:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: mednexa-api
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000" # API docs at http://localhost:8000/docs; staff use the dashboard
     environment:
-      MEDNEXA_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mednexa}:${POSTGRES_PASSWORD:-mednexa_secret}@db:5432/${POSTGRES_DB:-mednexa}
-      MEDNEXA_REDIS_URL: redis://redis:6379/0
-      MEDNEXA_JWT_SECRET: ${MEDNEXA_JWT_SECRET:-mednexa-super-secret-jwt-signing-key-32bytes-minimum}
-      MEDNEXA_JWT_ALGORITHM: ${MEDNEXA_JWT_ALGORITHM:-HS256}
+      MEDNEXA_DATABASE_URL: *database-url
+      # The API refuses to start unless these are set (no default credentials or keys).
+      MEDNEXA_JWT_SECRET: ${MEDNEXA_JWT_SECRET:?Set MEDNEXA_JWT_SECRET in .env (openssl rand -hex 32)}
       MEDNEXA_JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${MEDNEXA_JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-120}
-      MEDNEXA_CORS_ORIGINS: '["http://localhost:3000","http://127.0.0.1:3000","http://localhost:3001","http://127.0.0.1:3001"]'
+      MEDNEXA_ADMIN_EMAIL: ${MEDNEXA_ADMIN_EMAIL:?Set MEDNEXA_ADMIN_EMAIL in .env}
+      MEDNEXA_ADMIN_NAME: ${MEDNEXA_ADMIN_NAME:-Hospital Staff}
+      MEDNEXA_ADMIN_PASSWORD: ${MEDNEXA_ADMIN_PASSWORD:?Set MEDNEXA_ADMIN_PASSWORD in .env}
+      MEDNEXA_SERVICE_API_KEY: ${MEDNEXA_SERVICE_API_KEY:?Set MEDNEXA_SERVICE_API_KEY in .env (openssl rand -hex 32)}
       MEDNEXA_DEFAULT_COUNTRY_CODE: ${MEDNEXA_DEFAULT_COUNTRY_CODE:-91}
+      # The dashboard passes each browser's address in X-Forwarded-For so sign-in is
+      # throttled per person. Safe because the API is only reachable from this network
+      # and localhost.
+      FORWARDED_ALLOW_IPS: "*"
     depends_on:
       db:
-        condition: service_healthy
-      redis:
         condition: service_healthy
       migration:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')\""]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -91,43 +101,54 @@ services:
     networks:
       - mednexa-net
 
-  # ────────────────────────────────────────────────────────────────────────────
-  # Admin Dashboard UI (Part 4 Next.js 16)
-  # ────────────────────────────────────────────────────────────────────────────
+  # ── Admin dashboard (Part 4) ────────────────────────────────────────────────
   dashboard:
     build:
       context: ./dashboard
       dockerfile: Dockerfile
-      args:
-        NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
     container_name: mednexa-dashboard
     ports:
       - "3001:3000"
     environment:
-      NODE_ENV: production
-      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
-      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-mednexa-dashboard-auth-secret}
+      # How the dashboard server reaches the API. Browsers only talk to the dashboard.
+      BACKEND_URL: http://api:8000
+      # Cookies are Secure by default. Plain-HTTP access from other machines needs "false"
+      # (HTTPS is strongly preferred); http://localhost works either way.
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-true}
     depends_on:
       api:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/login || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     restart: unless-stopped
     networks:
       - mednexa-net
 
-  # ────────────────────────────────────────────────────────────────────────────
-  # Voice / Telephony Gateway (Part 3 + Part 2 Agent)
-  # ────────────────────────────────────────────────────────────────────────────
+  # ── Voice / telephony gateway (Part 3 + the Part 2 agent) ───────────────────
   telephony:
     build:
       context: .
       dockerfile: telephony/Dockerfile
     container_name: mednexa-telephony
     ports:
-      - "8001:8001"
+      - "8001:8001" # Twilio webhook / media stream: expose through an HTTPS proxy
     environment:
-      MEDNEXA_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mednexa}:${POSTGRES_PASSWORD:-mednexa_secret}@db:5432/${POSTGRES_DB:-mednexa}
+      # The agent reads the database directly (Part 2's service layer)...
+      MEDNEXA_DATABASE_URL: *database-url
+      # ...and the pipeline writes call logs through the API with the service key.
       MEDNEXA_TEL_BACKEND_URL: http://api:8000
+      MEDNEXA_TEL_BACKEND_API_KEY: ${MEDNEXA_SERVICE_API_KEY:?Set MEDNEXA_SERVICE_API_KEY in .env}
+      # UUID of the hospital to answer for. Create the hospital first (dashboard, or the
+      # demo seed), then set this and run `docker compose up -d telephony`.
       MEDNEXA_TEL_HOSPITAL_ID: ${MEDNEXA_TEL_HOSPITAL_ID:-}
+      MEDNEXA_TEL_PUBLIC_URL: ${MEDNEXA_TEL_PUBLIC_URL:-}
+      MEDNEXA_TEL_TWILIO_ACCOUNT_SID: ${MEDNEXA_TEL_TWILIO_ACCOUNT_SID:-}
+      MEDNEXA_TEL_TWILIO_AUTH_TOKEN: ${MEDNEXA_TEL_TWILIO_AUTH_TOKEN:-}
+      MEDNEXA_TEL_TWILIO_PHONE_NUMBER: ${MEDNEXA_TEL_TWILIO_PHONE_NUMBER:-}
       MEDNEXA_TEL_TTS_ENGINE: ${MEDNEXA_TEL_TTS_ENGINE:-edge}
       MEDNEXA_TEL_WHISPER_MODEL_SIZE: ${MEDNEXA_TEL_WHISPER_MODEL_SIZE:-base}
       MEDNEXA_TEL_WHISPER_DEVICE: ${MEDNEXA_TEL_WHISPER_DEVICE:-cpu}
@@ -145,14 +166,13 @@ services:
     networks:
       - mednexa-net
 
-  # ────────────────────────────────────────────────────────────────────────────
-  # Local AI LLM Service (Ollama)
-  # ────────────────────────────────────────────────────────────────────────────
+  # ── Local LLM (Ollama) ──────────────────────────────────────────────────────
+  # Internal only: Ollama has no authentication. Pull a model once after the first start:
+  #   docker compose exec ollama ollama pull llama3.1:8b
+  # (Pin the image to a specific version for production.)
   ollama:
     image: ollama/ollama:latest
     container_name: mednexa-ollama
-    ports:
-      - "11434:11434"
     volumes:
       - ollama_models:/root/.ollama
     restart: unless-stopped
@@ -161,7 +181,6 @@ services:
 
 volumes:
   pgdata:
-  redisdata:
   ollama_models:
 
 networks:
