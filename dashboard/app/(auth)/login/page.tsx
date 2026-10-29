@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
-import { HeartPulse, Lock, Mail, ArrowRight, ShieldCheck, AlertCircle, KeyRound } from "lucide-react";
+import { HeartPulse, Lock, Mail, ArrowRight, ShieldCheck, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -34,7 +34,7 @@ export default function LoginPage() {
     try {
       const res = await login(email, password);
       if (res.success) {
-        toast.success("Welcome back, Dr. Admin!");
+        toast.success("Signed in");
         router.replace("/dashboard");
       } else {
         setError(res.error ?? "Invalid email or password");
@@ -44,12 +44,6 @@ export default function LoginPage() {
     } finally {
       setIsSubmitting(false);
     }
-  };
-
-  const fillDemoCredentials = () => {
-    setEmail("admin@hospital.com");
-    setPassword("admin123");
-    setError(null);
   };
 
   if (isAuthLoading) {
@@ -96,7 +90,7 @@ export default function LoginPage() {
                   id="email"
                   type="email"
                   required
-                  placeholder="admin@hospital.com"
+                  placeholder="staff@hospital.example"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="pl-9 h-10 bg-background"
@@ -110,7 +104,6 @@ export default function LoginPage() {
                 <Label htmlFor="password" className="text-xs font-semibold">
                   Password
                 </Label>
-                <span className="text-[11px] text-muted-foreground">Stub Auth</span>
               </div>
               <div className="relative">
                 <Lock className="w-4 h-4 absolute left-3 top-3 text-muted-foreground" />
@@ -146,31 +139,6 @@ export default function LoginPage() {
             </Button>
           </form>
 
-          {/* Demo Credentials Quick-Fill helper */}
-          <div className="pt-2 border-t border-border">
-            <div className="p-3 rounded-lg bg-muted/60 border border-border text-xs space-y-2">
-              <div className="flex items-center justify-between text-muted-foreground">
-                <span className="font-semibold flex items-center gap-1.5 text-foreground">
-                  <KeyRound className="w-3.5 h-3.5 text-blue-500" />
-                  <span>Demo Credentials</span>
-                </span>
-                <span className="text-[10px] uppercase font-bold text-blue-600 dark:text-blue-400">
-                  Pre-configured
-                </span>
-              </div>
-              <p className="text-[11px] text-muted-foreground">
-                <code className="text-foreground font-mono">admin@hospital.com</code> /{" "}
-                <code className="text-foreground font-mono">admin123</code>
-              </p>
-              <button
-                type="button"
-                onClick={fillDemoCredentials}
-                className="w-full py-1.5 text-xs text-blue-600 dark:text-blue-400 font-semibold hover:underline text-center cursor-pointer"
-              >
-                Auto-fill credentials →
-              </button>
-            </div>
-          </div>
         </Card>
 
         {/* Security Footer Notice */}
