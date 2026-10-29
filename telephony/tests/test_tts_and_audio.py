@@ -30,7 +30,7 @@ class TestTTSEngine:
         engine._piper_ok = False
 
         import asyncio
-        result = asyncio.get_event_loop().run_until_complete(engine.speak("", "en"))
+        result = asyncio.run(engine.speak("", "en"))
         assert result == b""
 
     @pytest.mark.asyncio

@@ -102,6 +102,13 @@ class FasterWhisperSTT:
         ``language_hint`` can be "en" or "hi" to bias Whisper when the
         caller's language has already been detected in a previous turn.
         """
+        if not audio_bytes:
+            return TranscriptionResult(
+                text="",
+                language=DEFAULT_LANGUAGE,
+                confidence=0.0,
+                duration_seconds=0.0,
+            )
         self._load()
         import numpy as np  # noqa: PLC0415
 
