@@ -13,7 +13,7 @@ Implements the Twilio Programmable Voice + Media Streams flow:
 
 Audio format from Twilio Media Streams:
   - mulaw (μ-law) encoded, 8 kHz, mono, base64-encoded JSON messages.
-  - We decode μ-law → linear PCM, then upsample 8 kHz → 16 kHz for Whisper.
+  - Converted to/from the pipeline's 16 kHz PCM by telephony.audio_codec.
 
 Reference:
   https://www.twilio.com/docs/voice/tutorials/consume-real-time-media-stream-using-websockets-python-and-flask
@@ -24,13 +24,13 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-import struct
 from typing import AsyncIterator
 
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import PlainTextResponse
 
 from telephony.api_client import BackendClient
+from telephony.audio_codec import pipeline_to_twilio, twilio_to_pipeline
 from telephony.config import get_settings
 from telephony.logging_setup import get_logger
 from telephony.pipeline import CallPipeline
@@ -38,75 +38,6 @@ from telephony.pipeline import CallPipeline
 log = get_logger("twilio")
 
 router = APIRouter(prefix="/twilio", tags=["twilio"])
-
-# ── μ-law codec ────────────────────────────────────────────────────────────────
-
-_ULAW_TABLE: list[int] = []
-
-
-def _build_ulaw_table() -> None:
-    """Pre-compute the μ-law to linear int16 lookup table (ITU-T G.711)."""
-    global _ULAW_TABLE
-    _ULAW_TABLE = []
-    for i in range(256):
-        ulaw = ~i & 0xFF
-        sign = ulaw & 0x80
-        exponent = (ulaw >> 4) & 0x07
-        mantissa = ulaw & 0x0F
-        sample = ((mantissa << 3) + 0x84) << exponent
-        sample -= 0x84
-        if sign:
-            sample = -sample
-        _ULAW_TABLE.append(sample)
-
-
-_build_ulaw_table()
-
-
-def ulaw_to_linear(data: bytes) -> bytes:
-    """Decode G.711 μ-law bytes to 16-bit signed PCM (little-endian)."""
-    return struct.pack(f"<{len(data)}h", *(_ULAW_TABLE[b] for b in data))
-
-
-def upsample_8k_to_16k(pcm_8k: bytes) -> bytes:
-    """Simple 2x linear upsampler: 8 kHz → 16 kHz.
-
-    Each sample is duplicated (nearest-neighbour interpolation). This is
-    sufficient for speech; a polyphase resampler would add latency.
-    """
-    samples = struct.unpack(f"<{len(pcm_8k) // 2}h", pcm_8k)
-    upsampled = []
-    for s in samples:
-        upsampled.extend([s, s])  # duplicate
-    return struct.pack(f"<{len(upsampled)}h", *upsampled)
-
-
-def pcm_16k_to_ulaw_8k(pcm_16k: bytes) -> bytes:
-    """Convert 16 kHz int16 PCM to 8 kHz μ-law for Twilio playback.
-
-    Downsample 2x first (keep every other sample), then encode to μ-law.
-    """
-    samples = struct.unpack(f"<{len(pcm_16k) // 2}h", pcm_16k)
-    downsampled = samples[::2]
-
-    ulaw_bytes = []
-    for sample in downsampled:
-        # G.711 μ-law encode
-        sign = 0
-        if sample < 0:
-            sample = -sample
-            sign = 0x80
-        sample = min(sample, 32767)
-        sample += 0x84
-        exp = 7
-        for exp in range(7, 0, -1):
-            if sample >= (1 << (exp + 3)):
-                break
-        mantissa = (sample >> (exp + 3)) & 0x0F
-        ulaw = ~(sign | (exp << 4) | mantissa) & 0xFF
-        ulaw_bytes.append(ulaw)
-    return bytes(ulaw_bytes)
-
 
 # ── TwiML response ─────────────────────────────────────────────────────────────
 
@@ -195,9 +126,7 @@ async def stream_websocket(websocket: WebSocket, call_sid: str) -> None:
 
                 elif event == "media":
                     payload = msg.get("media", {}).get("payload", "")
-                    ulaw = base64.b64decode(payload)
-                    pcm_8k = ulaw_to_linear(ulaw)
-                    pcm_16k = upsample_8k_to_16k(pcm_8k)
+                    pcm_16k = twilio_to_pipeline(base64.b64decode(payload))
                     try:
                         audio_queue.put_nowait(pcm_16k)
                     except asyncio.QueueFull:
@@ -222,8 +151,7 @@ async def stream_websocket(websocket: WebSocket, call_sid: str) -> None:
 
     async def send_audio(pcm_16k: bytes) -> None:
         """Send TTS audio back to Twilio (PCM → μ-law → base64 JSON)."""
-        ulaw = pcm_16k_to_ulaw_8k(pcm_16k)
-        payload = base64.b64encode(ulaw).decode("ascii")
+        payload = base64.b64encode(pipeline_to_twilio(pcm_16k)).decode("ascii")
         msg = json.dumps({
             "event": "media",
             "streamSid": call_sid,

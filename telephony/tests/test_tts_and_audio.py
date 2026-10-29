@@ -12,9 +12,6 @@ from telephony.tts import (
     EdgeTTS,
     PiperTTS,
     TTSEngine,
-    pcm_16k_to_ulaw_8k,
-    ulaw_to_linear,
-    upsample_8k_to_16k,
 )
 
 
@@ -96,34 +93,7 @@ class TestTTSEngine:
         assert all(len(c) == CHUNK_BYTES for c in chunks)
 
 
-# ── Audio utils (codec) ────────────────────────────────────────────────────────
-
-
-class TestTwilioCodecs:
-    def test_ulaw_to_linear_roundtrip_approx(self) -> None:
-        """μ-law decode then encode should give back approximate original."""
-        # Import the encoder from twilio_handler
-        from telephony.twilio_handler import ulaw_to_linear, pcm_16k_to_ulaw_8k, upsample_8k_to_16k
-
-        # Create a simple 8 kHz test signal (100 bytes = 50 samples)
-        samples = [1000, -1000, 2000, -2000] * 12  # 48 samples
-        ulaw_bytes = bytes([
-            0b00110101 if s > 0 else 0b10110101 for s in samples
-        ])  # rough values — just test non-crash
-        linear = ulaw_to_linear(ulaw_bytes)
-        assert len(linear) == len(ulaw_bytes) * 2
-
-    def test_upsample_doubles_size(self) -> None:
-        from telephony.twilio_handler import upsample_8k_to_16k
-        pcm_8k = struct.pack("<10h", *range(10))
-        pcm_16k = upsample_8k_to_16k(pcm_8k)
-        assert len(pcm_16k) == len(pcm_8k) * 2
-
-    def test_pcm_16k_to_ulaw_8k_halves_size(self) -> None:
-        from telephony.twilio_handler import pcm_16k_to_ulaw_8k
-        pcm_16k = struct.pack("<20h", *([100] * 20))
-        ulaw = pcm_16k_to_ulaw_8k(pcm_16k)
-        assert len(ulaw) == 10  # 20 samples → 10 samples
+# The μ-law codec is tested in tests/test_audio_codec.py.
 
 
 # ── Audio quality ──────────────────────────────────────────────────────────────
