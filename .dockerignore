@@ -1,0 +1,36 @@
+# Applies to builds whose context is the repository root (telephony/Dockerfile, which
+# copies backend/, agent/ and telephony/). Without this, local virtualenvs, caches and
+# .env files (secrets) would be copied into the image. Builds with their own context
+# (backend/, dashboard/) use the .dockerignore in that folder.
+.git
+.github
+.gitignore
+
+# not needed by the telephony image
+dashboard
+scripts
+docker-compose.yml
+README.md
+Plan.md
+
+# local environments and caches
+**/.venv
+**/node_modules
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.coverage
+**/coverage.xml
+**/htmlcov
+**/*.log
+
+# secrets: .env files stay out of images (keep .env.example)
+**/.env
+**/.env.*
+!**/.env.example
+
+# call recordings and downloaded models
+**/recordings
+telephony/models
