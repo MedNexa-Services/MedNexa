@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import struct
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -138,3 +139,35 @@ class TestAudioUtils:
         t = np.linspace(0, 1, 16000)
         samples = (np.sin(2 * 3.14159 * 440 * t) * 30000).astype(np.int16)
         assert detect_silence(samples.tobytes()) is False
+
+
+class TestPiperSampleRate:
+    @pytest.mark.asyncio
+    async def test_piper_output_is_resampled_to_16k(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Piper voices speak at their own rate (22050 Hz for *-medium voices)."""
+        import json
+
+        import telephony.config as cfg_module
+
+        (tmp_path / "voice.onnx").write_bytes(b"")
+        (tmp_path / "voice.onnx.json").write_text(json.dumps({"audio": {"sample_rate": 22050}}))
+        settings = cfg_module.get_settings()
+        monkeypatch.setattr(settings, "piper_models_dir", str(tmp_path))
+        monkeypatch.setattr(settings, "piper_voice_en", "voice")
+
+        one_second_native = b"\x10\x00" * 22050
+
+        class FakeProcess:
+            returncode = 0
+
+            async def communicate(self, input: bytes) -> tuple[bytes, bytes]:
+                return one_second_native, b""
+
+        async def fake_exec(*args: object, **kwargs: object) -> FakeProcess:
+            return FakeProcess()
+
+        monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
+        pcm = await PiperTTS().synthesize("Hello", "en")
+        assert len(pcm) == 16000 * 2  # still one second, now at 16 kHz

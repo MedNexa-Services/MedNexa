@@ -18,11 +18,13 @@ Piper setup:
 from __future__ import annotations
 
 import asyncio
+import json
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import AsyncIterator
 
+from telephony.audio_codec import resample
 from telephony.config import get_settings
 from telephony.logging_setup import get_logger
 
@@ -32,6 +34,9 @@ log = get_logger("tts")
 SAMPLE_RATE = 16000
 CHANNELS = 1
 SAMPLE_WIDTH = 2  # bytes, int16
+
+# Used when a Piper voice has no readable .onnx.json (the rate of *-medium voices).
+PIPER_DEFAULT_RATE = 22050
 
 # WAV header is 44 bytes; we strip it and send raw PCM downstream.
 WAV_HEADER_BYTES = 44
@@ -65,6 +70,16 @@ class PiperTTS:
         voice_name = self._voices.get(language, self._voices["en"])
         return self._models_dir / f"{voice_name}.onnx"
 
+    @staticmethod
+    def _voice_sample_rate(voice: Path) -> int:
+        """Native output rate of a Piper voice, from its <voice>.onnx.json config."""
+        config = voice.with_name(voice.name + ".json")
+        try:
+            return int(json.loads(config.read_text())["audio"]["sample_rate"])
+        except (OSError, KeyError, ValueError, TypeError):
+            log.warning("piper_sample_rate_unknown", config=str(config), assumed=PIPER_DEFAULT_RATE)
+            return PIPER_DEFAULT_RATE
+
     def _is_available(self) -> bool:
         """Check if the piper binary exists and a model file is present."""
         try:
@@ -97,8 +112,9 @@ class PiperTTS:
         raw_out, raw_err = await proc.communicate(input=text.encode("utf-8"))
         if proc.returncode != 0:
             raise RuntimeError(f"Piper failed: {raw_err.decode()}")
-        # piper --output-raw produces raw s16le PCM (no header)
-        return raw_out
+        # piper --output-raw produces raw s16le PCM (no header) at the voice's own
+        # rate (22050 Hz for *-medium voices); the pipeline plays 16 kHz.
+        return resample(raw_out, self._voice_sample_rate(voice), SAMPLE_RATE)
 
     async def async_synthesize(
         self, text: str, language: str = "en"
