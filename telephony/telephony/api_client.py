@@ -29,12 +29,12 @@ class BackendClient:
     """
 
     def __init__(self, base_url: str | None = None, timeout: float = 10.0) -> None:
-        self._base = (base_url or get_settings().backend_url).rstrip("/")
-        self._client = httpx.AsyncClient(
-            base_url=self._base,
-            timeout=timeout,
-            headers={"Content-Type": "application/json"},
-        )
+        settings = get_settings()
+        self._base = (base_url or settings.backend_url).rstrip("/")
+        headers = {"Content-Type": "application/json"}
+        if settings.backend_api_key:
+            headers["Authorization"] = f"Bearer {settings.backend_api_key}"
+        self._client = httpx.AsyncClient(base_url=self._base, timeout=timeout, headers=headers)
 
     async def aclose(self) -> None:
         await self._client.aclose()

@@ -19,6 +19,10 @@ class TelephonySettings(BaseSettings):
     backend_url: str = "http://localhost:8000"
     """Base URL of the Part 1 FastAPI backend (no trailing slash)."""
 
+    backend_api_key: str = ""
+    """Service key for the backend's /calls routes (the backend's MEDNEXA_SERVICE_API_KEY).
+    Without it the backend rejects call-log requests with 401 once auth is enabled."""
+
     hospital_id: str = ""
     """UUID of the hospital this pipeline serves. Set in .env."""
 

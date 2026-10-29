@@ -47,6 +47,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # type: ignore[type-ar
     log.info("preloading_whisper")
     FasterWhisperSTT()._load()
 
+    if not cfg.hospital_id:
+        log.error(
+            "hospital_id_not_set",
+            hint="set MEDNEXA_TEL_HOSPITAL_ID to the hospital's UUID; calls cannot be logged",
+        )
+    if not cfg.backend_api_key:
+        log.warning(
+            "backend_api_key_not_set",
+            hint="set MEDNEXA_TEL_BACKEND_API_KEY (the backend's MEDNEXA_SERVICE_API_KEY); "
+            "an authenticated backend rejects call logs without it",
+        )
+
     # Health-check backend
     async with BackendClient() as client:
         healthy = await client.health_check()
@@ -84,10 +96,12 @@ def create_app() -> FastAPI:
     async def health() -> JSONResponse:
         async with BackendClient() as client:
             backend_ok = await client.health_check()
+        hospital_configured = bool(get_settings().hospital_id)
         return JSONResponse(
             {
-                "status": "ok",
+                "status": "ok" if backend_ok and hospital_configured else "degraded",
                 "backend_connected": backend_ok,
+                "hospital_configured": hospital_configured,
             }
         )
 
