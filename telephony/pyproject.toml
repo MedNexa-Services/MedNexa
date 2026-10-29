@@ -39,6 +39,14 @@ dependencies = [
     "structlog>=24.1",
 ]
 
+[project.optional-dependencies]
+# Part 2's MedNexaAgent (LangGraph + the backend service layer). Without it the
+# pipeline falls back to the StubAgent.
+agent = ["mednexa-agent"]
+
+[tool.uv.sources]
+mednexa-agent = { path = "../agent", editable = true }
+
 [dependency-groups]
 dev = [
     "pytest>=8.2",

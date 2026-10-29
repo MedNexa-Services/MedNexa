@@ -23,6 +23,9 @@ class TelephonySettings(BaseSettings):
     hospital_id: str = ""
     """UUID of the hospital this pipeline serves. Set in .env."""
 
+    use_stub_agent: bool = False
+    """Use the canned StubAgent even when Part 2's agent package is installed."""
+
     # ── Twilio ───────────────────────────────────────────────────────────────
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""

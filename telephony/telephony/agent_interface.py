@@ -3,15 +3,11 @@
 Part 3 (this module) drives the full call pipeline but must stay decoupled from
 Part 2's LangGraph agent so both can be developed and tested independently.
 
-This file defines the ``AgentInterface`` protocol and a ``StubAgent`` that
-returns hard-coded responses. When Part 2 delivers their ``MedNexaAgent``,
-the pipeline's ``CallPipeline`` is constructed with it:
-
-    from agent import MedNexaAgent          # Part 2's module
-    agent = MedNexaAgent(caller_phone, hospital_id)
-    pipeline = CallPipeline(session_id, caller_phone, agent=agent)
-
-Until then, ``StubAgent`` is used automatically in development / testing.
+This file defines the ``AgentInterface`` protocol, a ``StubAgent`` that returns
+hard-coded responses, and ``create_agent``, which the pipeline uses to build one
+agent per call: Part 2's ``MedNexaAgent`` when the ``agent`` package is
+installed (``uv sync --extra agent``), otherwise the stub, with a warning.
+Set ``MEDNEXA_TEL_USE_STUB_AGENT=true`` to force the stub.
 
 The interface Part 2 must implement:
     async def get_greeting(self) -> str
@@ -75,3 +71,18 @@ class StubAgent:
 
     async def get_summary(self) -> str | None:
         return f"Test call completed after {self._turn} turn(s)."
+
+
+def create_agent(caller_phone: str, hospital_id: str) -> AgentInterface:
+    """One agent per call: Part 2's MedNexaAgent if available, else the stub."""
+    from telephony.config import get_settings
+
+    if not get_settings().use_stub_agent:
+        try:
+            from agent import MedNexaAgent  # Part 2 (optional dependency)
+        except ImportError:
+            log.warning("mednexa_agent_unavailable", fallback="StubAgent")
+        else:
+            agent: AgentInterface = MedNexaAgent(caller_phone, hospital_id)
+            return agent
+    return StubAgent(caller_phone, hospital_id)

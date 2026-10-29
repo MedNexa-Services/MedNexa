@@ -33,7 +33,7 @@ from typing import Any
 
 import structlog
 
-from telephony.agent_interface import AgentInterface, StubAgent
+from telephony.agent_interface import AgentInterface, create_agent
 from telephony.api_client import BackendClient
 from telephony.audio_utils import AudioProcessor
 from telephony.config import get_settings
@@ -94,7 +94,7 @@ class CallPipeline:
         self._stt = FasterWhisperSTT()
         self._tts = TTSEngine()
         self._processor = AudioProcessor()
-        self._agent: AgentInterface = agent or StubAgent(caller_phone, cfg.hospital_id)
+        self._agent: AgentInterface = agent or create_agent(caller_phone, cfg.hospital_id)
         self._api = BackendClient()
         self._recorder = CallRecorder(session_id)
 
