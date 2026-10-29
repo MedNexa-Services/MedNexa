@@ -27,6 +27,7 @@ from pathlib import Path
 from telephony.audio_codec import resample
 from telephony.config import get_settings
 from telephony.logging_setup import get_logger
+
 log = get_logger("tts")
 
 # Output audio spec (must match what Asterisk/Twilio expects)
