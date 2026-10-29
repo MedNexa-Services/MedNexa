@@ -153,3 +153,16 @@ async def test_langchain_provider_adapts_chat_models() -> None:
     model = GenericFakeChatModel(messages=iter([say("hello from a chat model")]))
     provider = LangChainProvider("fake", model)
     assert (await provider.ainvoke(MESSAGES, [])).content == "hello from a chat model"
+
+
+async def test_slow_local_is_not_cut_off_when_there_is_no_cloud() -> None:
+    local = ScriptedProvider("local", [say("slow but fine")], delay=0.1)
+    router = ModelRouter(settings(max_latency_seconds=0.05), local, None)
+    assert (await router.ainvoke(MESSAGES)).content == "slow but fine"
+
+
+async def test_local_after_cloud_is_not_latency_capped() -> None:
+    local = ScriptedProvider("local", [say("local answer")], delay=0.1)
+    cloud = ScriptedProvider("cloud", [RuntimeError("cloud down")])
+    router = ModelRouter(settings(max_latency_seconds=0.05), local, cloud)
+    assert (await router.ainvoke(MESSAGES, language="hi")).content == "local answer"
