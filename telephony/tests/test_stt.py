@@ -114,13 +114,29 @@ class TestDeviceResolution:
     def test_explicit_cuda(self) -> None:
         assert FasterWhisperSTT._resolve_device("cuda") == "cuda"
 
-    def test_auto_no_cuda(self) -> None:
-        with patch("torch.cuda.is_available", return_value=False):
-            assert FasterWhisperSTT._resolve_device("auto") == "cpu"
+    @staticmethod
+    def _fake_torch(monkeypatch: pytest.MonkeyPatch, cuda: bool) -> None:
+        """A stand-in torch module, so these tests don't need the real (huge) package."""
+        import sys
+        import types
 
-    def test_auto_with_cuda(self) -> None:
-        with patch("torch.cuda.is_available", return_value=True):
-            assert FasterWhisperSTT._resolve_device("auto") == "cuda"
+        torch = types.ModuleType("torch")
+        torch.cuda = types.SimpleNamespace(is_available=lambda: cuda)  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "torch", torch)
+
+    def test_auto_no_cuda(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._fake_torch(monkeypatch, cuda=False)
+        assert FasterWhisperSTT._resolve_device("auto") == "cpu"
+
+    def test_auto_with_cuda(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._fake_torch(monkeypatch, cuda=True)
+        assert FasterWhisperSTT._resolve_device("auto") == "cuda"
+
+    def test_auto_without_torch_installed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import sys
+
+        monkeypatch.setitem(sys.modules, "torch", None)
+        assert FasterWhisperSTT._resolve_device("auto") == "cpu"
 
 
 class FakeWhisper:
