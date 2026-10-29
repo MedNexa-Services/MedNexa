@@ -163,25 +163,26 @@ class CallPipeline:
 
             # Run VAD
             events = self._vad.process_chunk(chunk)
+            speaking = "speech_start" in events or "speech" in events
+            utterance_ends = "speech_end" in events
 
-            for event in events:
-                if event in ("speech_start", "speech"):
-                    self._last_speech_time = time.monotonic()
+            if speaking:
+                self._last_speech_time = time.monotonic()
 
-                    # Barge-in: interrupt TTS if currently speaking
-                    if self._cfg.barge_in_enabled and self._tts_playing.is_set():
-                        self._barge_in_triggered.set()
-                        log.debug("barge_in", session_id=self.session_id)
+                # Barge-in: interrupt TTS if currently speaking
+                if self._cfg.barge_in_enabled and self._tts_playing.is_set():
+                    self._barge_in_triggered.set()
+                    log.debug("barge_in", session_id=self.session_id)
 
-                    # Accumulate audio for STT
-                    self._utterance_buf.extend(chunk)
-                    if len(self._utterance_buf) > MAX_UTTERANCE_BYTES:
-                        # Safety valve — force process to prevent runaway memory
-                        await self._process_utterance()
+            # Keep each chunk once while an utterance is open. VAD works in 32 ms
+            # frames, so a short chunk can carry no event at all mid-utterance,
+            # and a long one can carry several.
+            if speaking or utterance_ends or self._vad.in_speech:
+                self._utterance_buf.extend(chunk)
 
-                elif event == "speech_end":
-                    self._utterance_buf.extend(chunk)
-                    await self._process_utterance()
+            if utterance_ends or len(self._utterance_buf) > MAX_UTTERANCE_BYTES:
+                # (the size check is a safety valve against runaway memory)
+                await self._process_utterance()
 
     # ── utterance handling ────────────────────────────────────────────────────
 

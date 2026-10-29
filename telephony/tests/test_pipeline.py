@@ -206,3 +206,44 @@ class TestPipelineTimeout:
         await asyncio.wait_for(pipeline.run(endless_silence()), timeout=3.0)
         # end_call should have been called
         mock_api.end_call.assert_called_once()
+
+
+class TestUtteranceBuffering:
+    @pytest.mark.asyncio
+    async def test_utterance_keeps_every_chunk_exactly_once(
+        self,
+        mock_vad: MagicMock,
+        mock_stt: MagicMock,
+        mock_tts: MagicMock,
+        mock_api: MagicMock,
+        mock_recorder: MagicMock,
+    ) -> None:
+        """Chunks without a VAD event mid-speech are kept; multi-frame chunks aren't doubled."""
+        chunks = [b"\x01\x00" * 100, b"\x02\x00" * 100, b"\x03\x00" * 1100, b"\x04\x00" * 100]
+        script = [
+            (["speech_start"], True),
+            ([], True),  # shorter than a VAD frame: no event, but still mid-utterance
+            (["speech", "speech"], True),  # two frames in one chunk
+            (["speech_end"], False),
+        ]
+
+        def process_chunk(chunk: bytes) -> list[str]:
+            events, in_speech = script.pop(0)
+            mock_vad.in_speech = in_speech
+            return events
+
+        mock_vad.process_chunk.side_effect = process_chunk
+
+        async def audio() -> AsyncIterator[bytes]:
+            for c in chunks:
+                yield c
+
+        async def send(chunk: bytes) -> None:
+            pass
+
+        pipeline = CallPipeline("sess-buf", "+911234567890", send, agent=StubAgent())
+        pipeline._processor = MagicMock(process=lambda c: c)  # pass audio through unchanged
+        await pipeline.run(audio())
+
+        transcribed = mock_stt.transcribe_bytes.call_args.args[0]
+        assert transcribed == b"".join(chunks)
