@@ -121,3 +121,68 @@ class TestDeviceResolution:
     def test_auto_with_cuda(self) -> None:
         with patch("torch.cuda.is_available", return_value=True):
             assert FasterWhisperSTT._resolve_device("auto") == "cuda"
+
+
+class FakeWhisper:
+    """Stands in for faster_whisper.WhisperModel; records each transcribe call."""
+
+    def __init__(self, detected: str, probs: list[tuple[str, float]] | None = None) -> None:
+        self.detected = detected
+        self.probs = probs or []
+        self.calls: list[dict[str, object]] = []
+
+    def transcribe(self, samples: object, **kwargs: object) -> tuple[list[MagicMock], MagicMock]:
+        self.calls.append(kwargs)
+        segment = MagicMock(text=" text ", avg_logprob=-0.2)
+        info = MagicMock(duration=1.0, all_language_probs=self.probs)
+        info.language = kwargs.get("language") or self.detected
+        return [segment], info
+
+
+def make_stt(model: FakeWhisper) -> FasterWhisperSTT:
+    stt = FasterWhisperSTT.__new__(FasterWhisperSTT)
+    stt._beam_size, stt._vad_filter, stt._model = 1, False, model
+    return stt
+
+
+PCM = (np.ones(16000, dtype=np.int16) * 100).tobytes()
+
+
+class TestLanguageDetection:
+    def test_language_is_detected_not_forced(self) -> None:
+        model = FakeWhisper("hi")
+        assert make_stt(model).transcribe_bytes(PCM).language == "hi"
+        assert "language" not in model.calls[0]
+
+    def test_urdu_label_means_hindi(self) -> None:
+        model = FakeWhisper("ur")
+        assert make_stt(model).transcribe_bytes(PCM).language == "hi"
+        assert len(model.calls) == 1
+
+    def test_unsupported_language_is_redone_as_the_likelier_one(self) -> None:
+        model = FakeWhisper("ne", probs=[("ne", 0.5), ("hi", 0.3), ("en", 0.1)])
+        result = make_stt(model).transcribe_bytes(PCM)
+        assert result.language == "hi"
+        assert model.calls[1]["language"] == "hi"
+
+    def test_explicit_hint_is_still_honoured(self) -> None:
+        model = FakeWhisper("en")
+        assert make_stt(model).transcribe_bytes(PCM, language_hint="hi").language == "hi"
+        assert model.calls[0]["language"] == "hi"
+
+
+def test_whisper_model_is_loaded_once_and_shared(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+    import types
+
+    built: list[tuple[object, ...]] = []
+    fake_module = types.ModuleType("faster_whisper")
+    fake_module.WhisperModel = lambda *a, **kw: built.append(a) or object()  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake_module)
+    monkeypatch.setattr(FasterWhisperSTT, "_models", {})
+
+    first, second = FasterWhisperSTT(), FasterWhisperSTT()
+    first._load()
+    second._load()
+    assert len(built) == 1
+    assert first._model is second._model

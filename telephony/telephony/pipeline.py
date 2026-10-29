@@ -196,7 +196,9 @@ class CallPipeline:
 
         # STT
         t0 = time.monotonic()
-        result = self._stt.transcribe_bytes(pcm, language_hint=self._language)
+        # Whisper is blocking: run it off the event loop so other calls keep flowing.
+        # No language hint, so each utterance's language is detected afresh.
+        result = await asyncio.to_thread(self._stt.transcribe_bytes, pcm)
         stt_ms = int((time.monotonic() - t0) * 1000)
 
         # Update detected language
