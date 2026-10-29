@@ -31,22 +31,7 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to load hospital data";
       setError(msg);
-      // Fallback fallback so dashboard doesn't crash if backend is starting
-      setHospital((prev) => prev ?? {
-        id: "01b587a3-f471-4406-a1c6-4deb8dd44845",
-        name: "MedNexa City Hospital",
-        address: "12 Civil Lines, Jabalpur, Madhya Pradesh 482001",
-        phone: "+917612400000",
-        email: "reception@mednexa.example",
-        opening_time: "09:00:00",
-        closing_time: "20:00:00",
-        timezone: "Asia/Kolkata",
-        languages: ["en", "hi"],
-        general_instructions: "Patients should arrive 15 minutes before their slot.",
-        is_active: true,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      });
+      // Keep the last hospital actually loaded (if any); never substitute invented data.
     } finally {
       setIsLoading(false);
     }
