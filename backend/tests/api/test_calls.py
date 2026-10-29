@@ -75,3 +75,13 @@ async def test_call_for_unknown_hospital_is_404(client) -> None:
         json={"hospital_id": "00000000-0000-0000-0000-000000000000", "caller_phone": "9876543210"},
     )
     assert response.status_code == 404
+
+
+async def test_withheld_caller_number_is_logged_as_anonymous(client) -> None:
+    hospital = await create_hospital(client)
+    for withheld in ["anonymous", "", "Restricted"]:
+        response = await client.post(
+            "/api/v1/calls", json={"hospital_id": hospital["id"], "caller_phone": withheld}
+        )
+        assert response.status_code == 201
+        assert response.json()["caller_phone"] == "anonymous"

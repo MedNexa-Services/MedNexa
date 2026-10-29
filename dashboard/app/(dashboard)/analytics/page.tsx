@@ -5,11 +5,12 @@ import {
   listAppointments,
   listDoctors,
   listCalls,
+  fetchAllPages,
   type AppointmentOut,
   type DoctorOut,
-  type CallSessionOut,
 } from "@/lib/api";
 import { useHospital } from "@/contexts/HospitalContext";
+import { addDays, todayIn } from "@/lib/dates";
 import { toast } from "sonner";
 import {
   ResponsiveContainer,
@@ -58,34 +59,31 @@ const STATUS_COLORS: Record<string, string> = {
 const DAYS_OF_WEEK = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 export default function AnalyticsPage() {
-  const { hospitalId } = useHospital();
+  const { hospitalId, hospital } = useHospital();
 
-  const [dateRangePreset, setDateRangePreset] = React.useState<string>("seed");
-  const [dateFrom, setDateFrom] = React.useState<string>("2026-10-01");
-  const [dateTo, setDateTo] = React.useState<string>("2026-10-31");
+  const [dateRangePreset, setDateRangePreset] = React.useState<string>("all");
+  const [dateFrom, setDateFrom] = React.useState<string>("");
+  const [dateTo, setDateTo] = React.useState<string>("");
 
   const [appointments, setAppointments] = React.useState<AppointmentOut[]>([]);
   const [doctors, setDoctors] = React.useState<DoctorOut[]>([]);
-  const [calls, setCalls] = React.useState<CallSessionOut[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [truncated, setTruncated] = React.useState(false);
+  const [totalCalls, setTotalCalls] = React.useState(0);
 
-  // Quick preset dates
+  // Quick preset dates (relative to today in the hospital's timezone)
   const handlePresetChange = (preset: string) => {
     setDateRangePreset(preset);
-    const today = new Date();
+    const today = todayIn(hospital?.timezone);
     if (preset === "7days") {
-      const past7 = new Date();
-      past7.setDate(today.getDate() - 7);
-      setDateFrom(past7.toISOString().split("T")[0]);
-      setDateTo(today.toISOString().split("T")[0]);
+      setDateFrom(addDays(today, -7));
+      setDateTo(today);
     } else if (preset === "30days") {
-      const past30 = new Date();
-      past30.setDate(today.getDate() - 30);
-      setDateFrom(past30.toISOString().split("T")[0]);
-      setDateTo(today.toISOString().split("T")[0]);
-    } else if (preset === "seed") {
-      setDateFrom("2026-10-01");
-      setDateTo("2026-10-31");
+      setDateFrom(addDays(today, -30));
+      setDateTo(today);
+    } else if (preset === "next30") {
+      setDateFrom(today);
+      setDateTo(addDays(today, 30));
     } else if (preset === "all") {
       setDateFrom("");
       setDateTo("");
@@ -93,22 +91,27 @@ export default function AnalyticsPage() {
   };
 
   const fetchData = React.useCallback(async () => {
+    if (!hospitalId) return; // never aggregate across hospitals while the hospital is loading
     setIsLoading(true);
     try {
       const [aptRes, docRes, callRes] = await Promise.all([
-        listAppointments({
-          hospital_id: hospitalId,
-          date_from: dateFrom || undefined,
-          date_to: dateTo || undefined,
-          limit: 200,
-        }),
-        listDoctors({ limit: 100 }),
-        listCalls({ hospital_id: hospitalId, limit: 100 }),
+        fetchAllPages((limit, offset) =>
+          listAppointments({
+            hospital_id: hospitalId,
+            date_from: dateFrom || undefined,
+            date_to: dateTo || undefined,
+            limit,
+            offset,
+          })
+        ),
+        listDoctors({ hospital_id: hospitalId, limit: 200 }),
+        listCalls({ hospital_id: hospitalId, limit: 1 }),
       ]);
 
       setAppointments(aptRes.items);
+      setTruncated(aptRes.truncated);
       setDoctors(docRes.items);
-      setCalls(callRes.items);
+      setTotalCalls(callRes.total);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to load analytics";
       toast.error(msg);
@@ -235,7 +238,7 @@ export default function AnalyticsPage() {
   const bookedAppointments = appointments.filter((a) => a.status === "BOOKED").length;
   const cancelledAppointments = appointments.filter((a) => a.status === "CANCELLED").length;
   const bookingRate = totalAppointments > 0 ? Math.round((bookedAppointments / totalAppointments) * 100) : 0;
-  const aiCallsTotal = calls.length;
+  const aiCallsTotal = totalCalls;
 
   return (
     <div className="space-y-6">
@@ -265,6 +268,13 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Date Filter Bar */}
+      {truncated && (
+        <div className="p-3 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300 text-xs">
+          Showing the first {appointments.length} appointments in this window. Narrow the date
+          range for complete figures.
+        </div>
+      )}
+
       <Card className="p-4 space-y-3 bg-card border-border">
         <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
           <div className="flex flex-wrap items-center gap-2">
@@ -274,14 +284,14 @@ export default function AnalyticsPage() {
             </span>
             <button
               type="button"
-              onClick={() => handlePresetChange("seed")}
+              onClick={() => handlePresetChange("next30")}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
-                dateRangePreset === "seed"
+                dateRangePreset === "next30"
                   ? "bg-primary text-primary-foreground"
                   : "bg-muted text-muted-foreground hover:bg-muted/80"
               }`}
             >
-              Oct 2026 (Seeded Data)
+              Next 30 Days
             </button>
             <button
               type="button"

@@ -18,6 +18,8 @@ import {
   type ScheduleOverrideOut,
 } from "@/lib/api";
 import { toast } from "sonner";
+import { useHospital } from "@/contexts/HospitalContext";
+import { todayIn } from "@/lib/dates";
 import { Calendar, Clock, Ban, Trash2, Save, Loader2, Sparkles } from "lucide-react";
 
 interface ScheduleOverrideDialogProps {
@@ -39,7 +41,9 @@ export function ScheduleOverrideDialog({
   existingOverride,
   onSuccess,
 }: ScheduleOverrideDialogProps) {
-  const [date, setDate] = React.useState(defaultDate || new Date().toISOString().split("T")[0]);
+  const { hospital } = useHospital();
+  const today = todayIn(hospital?.timezone);
+  const [date, setDate] = React.useState(defaultDate || today);
   const [isLeave, setIsLeave] = React.useState(true); // true = Leave/Unavailable, false = Custom hours
   const [startTime, setStartTime] = React.useState("09:00");
   const [endTime, setEndTime] = React.useState("17:00");
@@ -59,14 +63,14 @@ export function ScheduleOverrideDialog({
         setEndTime(existingOverride.end_time ? existingOverride.end_time.slice(0, 5) : "17:00");
         setReason(existingOverride.override_reason || "");
       } else {
-        setDate(defaultDate || new Date().toISOString().split("T")[0]);
+        setDate(defaultDate || today);
         setIsLeave(true);
         setStartTime("09:00");
         setEndTime("17:00");
         setReason("");
       }
     }
-  }, [open, defaultDate, existingOverride]);
+  }, [open, defaultDate, existingOverride, today]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -1,11 +1,45 @@
+"""Create three sample call sessions (booked, FAQ in Hindi, emergency escalation)
+with transcripts, so the dashboard's call-log screens have something to show.
+
+    python scripts/seed_calls.py [API_URL]      # default http://127.0.0.1:8000/api/v1
+
+Needs the backend running with the sample data (cd backend && uv run python -m
+scripts.seed); it uses the first hospital and, if there is one, the first
+booked appointment. Requires httpx.
+"""
+
+import sys
 
 import httpx
 
-API = "http://127.0.0.1:8000/api/v1"
-hospital_id = "01b587a3-f471-4406-a1c6-4deb8dd44845"
-apt_id = "61a26598-453f-40a9-982a-6ea76a41a540"
+API = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8000/api/v1").rstrip("/")
 
-with httpx.Client() as client:
+
+def raise_on_error(response: httpx.Response) -> None:
+    response.read()
+    response.raise_for_status()
+
+
+with httpx.Client(event_hooks={"response": [raise_on_error]}) as client:
+    hospitals = client.get(f"{API}/hospitals", params={"limit": 1}).json()["items"]
+    if not hospitals:
+        sys.exit("No hospital found. Seed the backend first: cd backend && uv run python -m scripts.seed")
+    hospital_id = hospitals[0]["id"]
+    hospital_name = hospitals[0]["name"]
+
+    booked = client.get(
+        f"{API}/appointments", params={"hospital_id": hospital_id, "status": "BOOKED", "limit": 1}
+    ).json()["items"]
+    appt = booked[0] if booked else None
+    apt_id = appt["id"] if appt else None
+    appt_text = (
+        f"{appt['patient_name']} booked {appt['doctor_name']} for "
+        f"{appt['appointment_date']} at {appt['appointment_time'][:5]}. "
+        f"Token #{appt['token_number']} assigned."
+        if appt
+        else "A booking was made."
+    )
+
     # Call 1: Booked Appointment
     c1 = client.post(
         f"{API}/calls",
@@ -21,7 +55,7 @@ with httpx.Client() as client:
         f"{API}/calls/{s1_id}/logs",
         json={
             "role": "ASSISTANT",
-            "content": "Namaste! Welcome to MedNexa City Hospital. I am your AI receptionist. How may I assist your health needs today?",
+            "content": f"Namaste! Welcome to {hospital_name}. I am your AI receptionist. How may I assist your health needs today?",
         },
     )
     client.post(
@@ -35,7 +69,7 @@ with httpx.Client() as client:
         f"{API}/calls/{s1_id}/logs",
         json={
             "role": "TOOL",
-            "content": "Checking availability for Dr. Sharma on 2026-10-26...",
+            "content": "Checking availability for the requested doctor...",
             "tool_called": "check_available_slots",
             "tool_result": '{"available_slots": ["09:00:00", "09:15:00", "09:30:00"]}',
         },
@@ -73,7 +107,7 @@ with httpx.Client() as client:
         f"{API}/calls/{s1_id}/end",
         json={
             "call_outcome": "BOOKED",
-            "summary": "Caller Rahul Kumar booked a cardiology slot with Dr. Anil Sharma for 2026-10-26 at 09:00 AM. Token #1 assigned.",
+            "summary": appt_text,
             "language_detected": "en",
             "escalated_to_human": False,
         },
@@ -152,7 +186,7 @@ with httpx.Client() as client:
         f"{API}/calls/{s3_id}/logs",
         json={
             "role": "ASSISTANT",
-            "content": "Welcome to MedNexa City Hospital. How can I help you today?",
+            "content": f"Welcome to {hospital_name}. How can I help you today?",
         },
     )
     client.post(

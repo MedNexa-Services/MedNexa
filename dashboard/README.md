@@ -40,11 +40,15 @@ Copy the example environment configuration into `.env.local`:
 cp .env.example .env.local
 ```
 
-Default configuration in `.env.local`:
+Then edit `.env.local`:
 ```env
-# Point to your MedNexa FastAPI backend API root
+# Point to your MedNexa FastAPI backend API root (as seen from the browser)
 NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
-NEXTAUTH_SECRET=change-me-in-production
+
+# Staff sign-in (server-side only). Sign-in is disabled until all three are set.
+AUTH_SECRET=<32+ random characters, e.g. `openssl rand -hex 32`>
+STAFF_EMAIL=you@hospital.example
+STAFF_PASSWORD=<a strong password>
 ```
 
 ### 2. Install Dependencies
@@ -61,9 +65,11 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-> **Staff Demo Credentials**:
-> - Email: `admin@hospital.com`
-> - Password: `admin123`
+Sign in with the `STAFF_EMAIL` / `STAFF_PASSWORD` you configured. Sessions are signed,
+httpOnly cookies checked on the server (`proxy.ts`) and last 8 hours. The cookie is
+`Secure` in production; if the dashboard is served over plain HTTP on a hospital LAN,
+set `AUTH_COOKIE_SECURE=false` (HTTPS is strongly preferred). Part 5 replaces this
+single account with backend-issued JWTs (plan task 5.3).
 
 ---
 

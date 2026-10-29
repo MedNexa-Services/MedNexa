@@ -10,6 +10,7 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "httpx>=0.27",
     "websockets>=12.0",
+    "python-multipart>=0.0.9",  # request.form() in the Twilio webhook
 
     # STT: Faster-Whisper (CTranslate2 backend)
     "faster-whisper>=1.0",
@@ -37,6 +38,14 @@ dependencies = [
     # Logging
     "structlog>=24.1",
 ]
+
+[project.optional-dependencies]
+# Part 2's MedNexaAgent (LangGraph + the backend service layer). Without it the
+# pipeline falls back to the StubAgent.
+agent = ["mednexa-agent"]
+
+[tool.uv.sources]
+mednexa-agent = { path = "../agent", editable = true }
 
 [dependency-groups]
 dev = [

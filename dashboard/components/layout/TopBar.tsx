@@ -78,7 +78,7 @@ export function TopBar({ onMenuClick }: TopBarProps) {
           </div>
           <div className="hidden md:block text-left">
             <div className="flex items-center gap-1 text-xs font-semibold text-foreground">
-              <span>{user?.name ?? "Dr. Admin"}</span>
+              <span>{user?.name ?? "Staff"}</span>
               <ShieldCheck className="w-3.5 h-3.5 text-blue-500" />
             </div>
             <p className="text-[11px] text-muted-foreground">{user?.role ?? "Staff"}</p>

@@ -10,6 +10,7 @@ import {
   type AppointmentStatus,
 } from "@/lib/api";
 import { useHospital } from "@/contexts/HospitalContext";
+import { addDays, todayIn } from "@/lib/dates";
 import { BookAppointmentDialog } from "@/components/appointments/BookAppointmentDialog";
 import { CancelAppointmentDialog } from "@/components/appointments/CancelAppointmentDialog";
 import { RescheduleAppointmentDialog } from "@/components/appointments/RescheduleAppointmentDialog";
@@ -85,10 +86,15 @@ const SOURCE_CONFIG = {
 };
 
 export default function AppointmentsPage() {
-  const { hospitalId } = useHospital();
+  const { hospitalId, hospital } = useHospital();
 
   // Filters
-  const [selectedDate, setSelectedDate] = React.useState<string>("2026-10-26");
+  // null = today (in the hospital's timezone), "" = all dates, otherwise a picked date
+  const [pickedDate, setPickedDate] = React.useState<string | null>(null);
+  const today = todayIn(hospital?.timezone);
+  const tomorrow = addDays(today, 1);
+  const selectedDate = pickedDate ?? today;
+  const setSelectedDate = setPickedDate;
   const [selectedDoctorId, setSelectedDoctorId] = React.useState<string>("");
   const [selectedStatus, setSelectedStatus] = React.useState<string>("");
   const [searchQuery, setSearchQuery] = React.useState<string>("");
@@ -110,16 +116,17 @@ export default function AppointmentsPage() {
 
   // Load doctors for dropdown
   React.useEffect(() => {
+    if (!hospitalId) return;
     async function fetchDoctors() {
       try {
-        const res = await listDoctors({ limit: 100 });
+        const res = await listDoctors({ hospital_id: hospitalId, limit: 100 });
         setDoctors(res.items);
       } catch (err: unknown) {
         console.error("Failed to load doctors:", err);
       }
     }
     fetchDoctors();
-  }, []);
+  }, [hospitalId]);
 
   // Fetch appointments based on filters & pagination
   const fetchAppointments = React.useCallback(async () => {
@@ -260,9 +267,9 @@ export default function AppointmentsPage() {
           </button>
           <button
             type="button"
-            onClick={() => handleFilterChange(setSelectedDate, new Date().toISOString().split("T")[0])}
+            onClick={() => handleFilterChange(setSelectedDate, today)}
             className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-              selectedDate === new Date().toISOString().split("T")[0]
+              selectedDate === today
                 ? "bg-primary text-primary-foreground font-semibold"
                 : "bg-muted hover:bg-muted/80 text-foreground"
             }`}
@@ -271,25 +278,14 @@ export default function AppointmentsPage() {
           </button>
           <button
             type="button"
-            onClick={() => handleFilterChange(setSelectedDate, "2026-10-26")}
+            onClick={() => handleFilterChange(setSelectedDate, tomorrow)}
             className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-              selectedDate === "2026-10-26"
+              selectedDate === tomorrow
                 ? "bg-primary text-primary-foreground font-semibold"
                 : "bg-muted hover:bg-muted/80 text-foreground"
             }`}
           >
-            Oct 26 (Seeded)
-          </button>
-          <button
-            type="button"
-            onClick={() => handleFilterChange(setSelectedDate, "2026-10-27")}
-            className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-              selectedDate === "2026-10-27"
-                ? "bg-primary text-primary-foreground font-semibold"
-                : "bg-muted hover:bg-muted/80 text-foreground"
-            }`}
-          >
-            Oct 27 (Seeded)
+            Tomorrow
           </button>
 
           <div className="ml-auto flex items-center gap-2">
@@ -467,10 +463,10 @@ export default function AppointmentsPage() {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => handleFilterChange(setSelectedDate, "2026-10-26")}
+                        onClick={() => handleFilterChange(setSelectedDate, "")}
                         className="text-xs cursor-pointer"
                       >
-                        Jump to Oct 26 Seed
+                        Show All Dates
                       </Button>
                       <Button
                         size="sm"

@@ -19,9 +19,9 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from typing import Any
 
-from app.core.exceptions import DomainError
+from app.core.exceptions import DomainError, NotFound
 from app.core.timeutils import hospital_now
-from app.models import BookingSource, Hospital
+from app.models import Appointment, BookingSource, Doctor, Hospital
 from app.schemas.appointment import AppointmentOut, BookingRequest
 from app.schemas.patient import PatientIn
 from app.services import contracts
@@ -110,6 +110,26 @@ def _appointment(a: AppointmentOut) -> dict[str, Any]:
         "token_number": a.token_number,
         "status": a.status.value,
     }
+
+
+async def _own_doctor(ctx: ToolContext, db: AsyncSession, raw_id: str) -> uuid.UUID:
+    """The doctor id, if that doctor belongs to the hospital this call came in on."""
+    doctor_id = parse_id(raw_id, "doctor")
+    hospital_id = await db.scalar(select(Doctor.hospital_id).where(Doctor.id == doctor_id))
+    if hospital_id != ctx.hospital_id:
+        raise NotFound("Doctor not found")
+    return doctor_id
+
+
+async def _own_appointment(ctx: ToolContext, db: AsyncSession, raw_id: str) -> uuid.UUID:
+    """The appointment id, if it belongs to the hospital this call came in on."""
+    appointment_id = parse_id(raw_id, "appointment")
+    hospital_id = await db.scalar(
+        select(Appointment.hospital_id).where(Appointment.id == appointment_id)
+    )
+    if hospital_id != ctx.hospital_id:
+        raise NotFound("Appointment not found")
+    return appointment_id
 
 
 def _require_caller(ctx: ToolContext) -> str:
@@ -212,9 +232,7 @@ async def list_doctors(ctx: ToolContext, db: AsyncSession, a: ListDoctorsArgs) -
 
 
 async def get_doctor_details(ctx: ToolContext, db: AsyncSession, a: DoctorArgs) -> dict[str, Any]:
-    d = await contracts.get_doctor(db, parse_id(a.doctor_id, "doctor"))
-    if d.hospital_id != ctx.hospital_id:
-        raise DomainError("Doctor not found")
+    d = await contracts.get_doctor(db, await _own_doctor(ctx, db, a.doctor_id))
     return {
         "ok": True,
         "doctor": {
@@ -246,7 +264,8 @@ async def get_doctor_details(ctx: ToolContext, db: AsyncSession, a: DoctorArgs) 
 async def check_available_slots(ctx: ToolContext, db: AsyncSession, a: SlotsArgs) -> dict[str, Any]:
     on = parse_date(a.date)
     now = await ctx.current_time(db)
-    slots = await contracts.get_available_slots(db, parse_id(a.doctor_id, "doctor"), on, now=now)
+    doctor_id = await _own_doctor(ctx, db, a.doctor_id)
+    slots = await contracts.get_available_slots(db, doctor_id, on, now=now)
     return {
         "ok": True,
         "date": on.isoformat(),
@@ -288,7 +307,7 @@ async def book_appointment(ctx: ToolContext, db: AsyncSession, a: BookArgs) -> d
         raise ToolInputError("Invalid patient details (name, age or gender)") from exc
     request = BookingRequest(
         patient=patient,
-        doctor_id=parse_id(a.doctor_id, "doctor"),
+        doctor_id=await _own_doctor(ctx, db, a.doctor_id),
         appointment_date=parse_date(a.date),
         appointment_time=parse_time(a.time),
         notes=a.notes,
@@ -322,7 +341,7 @@ async def cancel_appointment(ctx: ToolContext, db: AsyncSession, a: CancelArgs) 
     phone = _require_caller(ctx)
     appt = await contracts.cancel_appointment(
         db,
-        parse_id(a.appointment_id, "appointment"),
+        await _own_appointment(ctx, db, a.appointment_id),
         phone,
         a.reason,
         now=await ctx.current_time(db),
@@ -336,7 +355,7 @@ async def reschedule_appointment(
     phone = _require_caller(ctx)
     c = await contracts.reschedule_appointment(
         db,
-        parse_id(a.appointment_id, "appointment"),
+        await _own_appointment(ctx, db, a.appointment_id),
         phone,
         parse_date(a.new_date),
         parse_time(a.new_time),

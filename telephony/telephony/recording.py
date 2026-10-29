@@ -12,9 +12,8 @@ with the final data size.
 
 from __future__ import annotations
 
-import struct
 import wave
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from pathlib import Path
 
 from telephony.config import get_settings
@@ -22,13 +21,15 @@ from telephony.logging_setup import get_logger
 
 log = get_logger("recorder")
 
+# Callers can't opt out mid-call yet (keypad/DTMF input is not implemented,
+# plan task 3.11), so the prompt must not offer an opt-out: it only informs.
 CONSENT_PROMPT_EN = (
-    "This call may be recorded for quality and training purposes. "
-    "If you do not wish to be recorded, please press 9 to continue without recording."
+    "Please note that this call is recorded for quality and training purposes. "
+    "If you do not want to be recorded, you can end the call now."
 )
 CONSENT_PROMPT_HI = (
-    "यह कॉल गुणवत्ता और प्रशिक्षण उद्देश्यों के लिए रिकॉर्ड की जा सकती है। "
-    "यदि आप रिकॉर्डिंग नहीं चाहते, तो बिना रिकॉर्डिंग के जारी रखने के लिए 9 दबाएँ।"
+    "कृपया ध्यान दें कि गुणवत्ता और प्रशिक्षण के लिए यह कॉल रिकॉर्ड की जा रही है। "
+    "यदि आप रिकॉर्डिंग नहीं चाहते, तो आप अभी कॉल समाप्त कर सकते हैं।"
 )
 
 
@@ -54,7 +55,7 @@ class CallRecorder:
             ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
             self._path = recordings_dir / f"{session_id}_{ts}.wav"
 
-    def __enter__(self) -> "CallRecorder":
+    def __enter__(self) -> CallRecorder:
         if self._enabled and self._path:
             self._wav = wave.open(str(self._path), "wb")
             self._wav.setnchannels(1)

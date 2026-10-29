@@ -1,0 +1,50 @@
+name: Dashboard CI
+
+# Runs only when the dashboard changes.
+on:
+  push:
+    paths:
+      - "dashboard/**"
+  pull_request:
+    paths:
+      - "dashboard/**"
+  workflow_dispatch:
+
+concurrency:
+  group: dashboard-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: dashboard
+
+jobs:
+  check:
+    name: Lint, types & build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: ESLint
+        run: npx eslint .
+
+      - name: TypeScript
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"

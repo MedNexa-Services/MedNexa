@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import struct
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -64,17 +63,20 @@ class TestTranscribeBytes:
         mock_info.language = "en"
         mock_info.duration = 2.0
 
-        with patch.object(stt, "_load"):
-            with patch.object(
-                stt, "_transcribe_array",
+        with (
+            patch.object(stt, "_load"),
+            patch.object(
+                stt,
+                "_transcribe_array",
                 return_value=TranscriptionResult(
                     text="Hello, how can I help?",
                     language="en",
                     confidence=0.9,
                     duration_seconds=2.0,
-                )
-            ):
-                result = stt.transcribe_bytes(self._make_pcm(2.0))
+                ),
+            ),
+        ):
+            result = stt.transcribe_bytes(self._make_pcm(2.0))
 
         assert result.text == "Hello, how can I help?"
         assert result.language == "en"
@@ -92,17 +94,17 @@ class TestTranscribeBytes:
 
         captured: dict[str, object] = {}
 
-        def fake_transcribe(
-            samples: object, *, language_hint: str | None
-        ) -> TranscriptionResult:
+        def fake_transcribe(samples: object, *, language_hint: str | None) -> TranscriptionResult:
             captured["hint"] = language_hint
             return TranscriptionResult(
                 text="नमस्ते", language="hi", confidence=0.85, duration_seconds=1.0
             )
 
-        with patch.object(stt, "_load"):
-            with patch.object(stt, "_transcribe_array", side_effect=fake_transcribe):
-                stt.transcribe_bytes(self._make_pcm(), language_hint="hi")
+        with (
+            patch.object(stt, "_load"),
+            patch.object(stt, "_transcribe_array", side_effect=fake_transcribe),
+        ):
+            stt.transcribe_bytes(self._make_pcm(), language_hint="hi")
 
         assert captured["hint"] == "hi"
 
@@ -114,10 +116,91 @@ class TestDeviceResolution:
     def test_explicit_cuda(self) -> None:
         assert FasterWhisperSTT._resolve_device("cuda") == "cuda"
 
-    def test_auto_no_cuda(self) -> None:
-        with patch("torch.cuda.is_available", return_value=False):
-            assert FasterWhisperSTT._resolve_device("auto") == "cpu"
+    @staticmethod
+    def _fake_torch(monkeypatch: pytest.MonkeyPatch, cuda: bool) -> None:
+        """A stand-in torch module, so these tests don't need the real (huge) package."""
+        import sys
+        import types
 
-    def test_auto_with_cuda(self) -> None:
-        with patch("torch.cuda.is_available", return_value=True):
-            assert FasterWhisperSTT._resolve_device("auto") == "cuda"
+        torch = types.ModuleType("torch")
+        torch.cuda = types.SimpleNamespace(is_available=lambda: cuda)  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "torch", torch)
+
+    def test_auto_no_cuda(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._fake_torch(monkeypatch, cuda=False)
+        assert FasterWhisperSTT._resolve_device("auto") == "cpu"
+
+    def test_auto_with_cuda(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._fake_torch(monkeypatch, cuda=True)
+        assert FasterWhisperSTT._resolve_device("auto") == "cuda"
+
+    def test_auto_without_torch_installed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import sys
+
+        monkeypatch.setitem(sys.modules, "torch", None)
+        assert FasterWhisperSTT._resolve_device("auto") == "cpu"
+
+
+class FakeWhisper:
+    """Stands in for faster_whisper.WhisperModel; records each transcribe call."""
+
+    def __init__(self, detected: str, probs: list[tuple[str, float]] | None = None) -> None:
+        self.detected = detected
+        self.probs = probs or []
+        self.calls: list[dict[str, object]] = []
+
+    def transcribe(self, samples: object, **kwargs: object) -> tuple[list[MagicMock], MagicMock]:
+        self.calls.append(kwargs)
+        segment = MagicMock(text=" text ", avg_logprob=-0.2)
+        info = MagicMock(duration=1.0, all_language_probs=self.probs)
+        info.language = kwargs.get("language") or self.detected
+        return [segment], info
+
+
+def make_stt(model: FakeWhisper) -> FasterWhisperSTT:
+    stt = FasterWhisperSTT.__new__(FasterWhisperSTT)
+    stt._beam_size, stt._vad_filter, stt._model = 1, False, model
+    return stt
+
+
+PCM = (np.ones(16000, dtype=np.int16) * 100).tobytes()
+
+
+class TestLanguageDetection:
+    def test_language_is_detected_not_forced(self) -> None:
+        model = FakeWhisper("hi")
+        assert make_stt(model).transcribe_bytes(PCM).language == "hi"
+        assert "language" not in model.calls[0]
+
+    def test_urdu_label_means_hindi(self) -> None:
+        model = FakeWhisper("ur")
+        assert make_stt(model).transcribe_bytes(PCM).language == "hi"
+        assert len(model.calls) == 1
+
+    def test_unsupported_language_is_redone_as_the_likelier_one(self) -> None:
+        model = FakeWhisper("ne", probs=[("ne", 0.5), ("hi", 0.3), ("en", 0.1)])
+        result = make_stt(model).transcribe_bytes(PCM)
+        assert result.language == "hi"
+        assert model.calls[1]["language"] == "hi"
+
+    def test_explicit_hint_is_still_honoured(self) -> None:
+        model = FakeWhisper("en")
+        assert make_stt(model).transcribe_bytes(PCM, language_hint="hi").language == "hi"
+        assert model.calls[0]["language"] == "hi"
+
+
+def test_whisper_model_is_loaded_once_and_shared(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+    import types
+
+    built: list[tuple[object, ...]] = []
+    fake_module = types.ModuleType("faster_whisper")
+    fake_module.WhisperModel = lambda *a, **kw: built.append(a) or object()  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake_module)
+    monkeypatch.setattr(FasterWhisperSTT, "_models", {})
+
+    first, second = FasterWhisperSTT(), FasterWhisperSTT()
+    first._load()
+    second._load()
+    assert len(built) == 1
+    assert first._model is second._model

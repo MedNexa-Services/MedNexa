@@ -46,8 +46,17 @@ def test_medical_advice_is_replaced(text: str) -> None:
     assert "can't give medical advice" in result.text
 
 
-def test_hospital_facts_are_not_mistaken_for_advice() -> None:
-    assert not check("The pharmacy is open 24 hours and the doctor can see you at 10 AM.").changed
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The pharmacy is open 24 hours and the doctor can see you at 10 AM.",
+        "Please have your medicines list ready for the doctor.",
+        "Do you have any medicine allergies the doctor should know about?",
+        "Please bring your current medications to the appointment.",
+    ],
+)
+def test_receptionist_phrases_are_not_mistaken_for_advice(text: str) -> None:
+    assert not check(text).changed
 
 
 @pytest.mark.parametrize(

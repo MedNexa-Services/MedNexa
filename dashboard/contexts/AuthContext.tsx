@@ -14,53 +14,64 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = React.createContext<AuthContextType | undefined>(undefined);
 
-const STORAGE_KEY = "mednexa_staff_session";
-
+// The session lives in an httpOnly cookie set by /api/auth/login and checked on
+// the server (proxy.ts); this context only mirrors who is signed in for the UI.
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = React.useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const router = useRouter();
 
   React.useEffect(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        setUser(JSON.parse(stored));
-      }
-    } catch {
-      localStorage.removeItem(STORAGE_KEY);
-    } finally {
-      setIsLoading(false);
-    }
+    let cancelled = false;
+    fetch("/api/auth/session", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : { user: null }))
+      .then((data: { user: AuthUser | null }) => {
+        if (!cancelled) setUser(data.user);
+      })
+      .catch(() => {
+        if (!cancelled) setUser(null);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
-    // Auth stub: Part 5 replaces this with JWT /oauth/token call
-    if (email.trim().toLowerCase() === "admin@hospital.com" && password === "admin123") {
-      const staffUser: AuthUser = {
-        email: "admin@hospital.com",
-        name: "Dr. Admin",
-        role: "Hospital Staff",
-      };
-      setUser(staffUser);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(staffUser));
+  const login = async (
+    email: string,
+    password: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = (await res.json()) as { user?: AuthUser; error?: string };
+      if (!res.ok || !data.user) {
+        return { success: false, error: data.error ?? "Sign-in failed" };
+      }
+      setUser(data.user);
       return { success: true };
+    } catch {
+      return { success: false, error: "Could not reach the sign-in service" };
     }
-    return {
-      success: false,
-      error: "Invalid credentials. Use admin@hospital.com / admin123",
-    };
   };
 
-  const logout = () => {
-    setUser(null);
-    localStorage.removeItem(STORAGE_KEY);
-    router.replace("/login");
+  const logout = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } finally {
+      setUser(null);
+      router.replace("/login");
+    }
   };
 
   return (

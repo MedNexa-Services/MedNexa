@@ -66,9 +66,9 @@ export default function DoctorSchedulePage() {
   const [overrides, setOverrides] = React.useState<ScheduleOverrideOut[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
 
-  // Month navigation (defaults to Oct 2026 for seeded data)
-  const [currentYear, setCurrentYear] = React.useState(2026);
-  const [currentMonth, setCurrentMonth] = React.useState(9); // 0-indexed: 9 = October
+  // Month navigation (starts on the current month)
+  const [currentYear, setCurrentYear] = React.useState(() => new Date().getFullYear());
+  const [currentMonth, setCurrentMonth] = React.useState(() => new Date().getMonth()); // 0-indexed
 
   // Dialogs
   const [overrideDialogOpen, setOverrideDialogOpen] = React.useState(false);
@@ -460,12 +460,13 @@ export default function DoctorSchedulePage() {
               variant="outline"
               size="sm"
               onClick={() => {
-                setCurrentYear(2026);
-                setCurrentMonth(9); // Oct 2026
+                const now = new Date();
+                setCurrentYear(now.getFullYear());
+                setCurrentMonth(now.getMonth());
               }}
               className="h-8 px-2.5 text-xs cursor-pointer"
             >
-              Oct 2026 (Seed)
+              This Month
             </Button>
             <Button
               type="button"
