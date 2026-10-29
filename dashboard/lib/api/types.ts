@@ -154,7 +154,6 @@ export interface ScheduleOverrideOut {
   start_time: string | null;
   end_time: string | null;
   override_reason: string | null;
-  created_at: string;
 }
 
 export interface ScheduleOverrideIn {
@@ -208,8 +207,8 @@ export interface PatientCreate extends PatientIn {
   hospital_id: string;
 }
 
+// Name and phone identify a patient and cannot be changed through the API.
 export interface PatientUpdate {
-  name?: string | null;
   age?: number | null;
   gender?: Gender | null;
   email?: string | null;
