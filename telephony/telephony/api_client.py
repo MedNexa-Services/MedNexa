@@ -78,8 +78,11 @@ class BackendClient:
         tool_result: str | None = None,
         appointment_id: str | None = None,
     ) -> None:
-        """Append one conversation turn to the call log."""
-        body: dict[str, Any] = {"role": role, "content": content}
+        """Append one conversation turn to the call log.
+
+        ``role`` is a backend CallRole: USER, ASSISTANT, TOOL or SYSTEM.
+        """
+        body: dict[str, Any] = {"role": role.upper(), "content": content}
         if tool_called:
             body["tool_called"] = tool_called
         if tool_result:
@@ -96,12 +99,16 @@ class BackendClient:
         self,
         session_id: str,
         *,
-        outcome: str = "completed",
+        outcome: str = "OTHER",
         summary: str | None = None,
         language_detected: str | None = None,
         escalated_to_human: bool = False,
     ) -> None:
-        """Mark the call session as ended with outcome metadata."""
+        """Mark the call session as ended with outcome metadata.
+
+        ``outcome`` is a backend CallOutcome (BOOKED, CANCELLED, RESCHEDULED,
+        INFO_PROVIDED, ESCALATED, ABANDONED, OTHER).
+        """
         body: dict[str, Any] = {
             "call_outcome": outcome,
             "escalated_to_human": escalated_to_human,

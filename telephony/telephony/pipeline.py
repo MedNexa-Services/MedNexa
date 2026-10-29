@@ -124,12 +124,12 @@ class CallPipeline:
             # Play consent prompt if recording is enabled
             if self._recorder.enabled:
                 await self._speak(self._recorder.consent_prompt(self._language))
-                await self._log("assistant", self._recorder.consent_prompt(self._language))
+                await self._log("ASSISTANT", self._recorder.consent_prompt(self._language))
 
             # Play opening greeting
             greeting = await self._agent.get_greeting()
             await self._speak(greeting)
-            await self._log("assistant", greeting)
+            await self._log("ASSISTANT", greeting)
 
             try:
                 async with asyncio.timeout(self._cfg.call_timeout_seconds):
@@ -241,7 +241,7 @@ class CallPipeline:
             return
 
         # Log the caller's turn
-        await self._log("user", text)
+        await self._log("USER", text)
 
         # Agent
         t1 = time.monotonic()
@@ -256,7 +256,7 @@ class CallPipeline:
         )
 
         # Log the agent's turn
-        await self._log("assistant", response)
+        await self._log("ASSISTANT", response)
 
         # TTS
         await self._speak(response, language=self._language)
@@ -306,12 +306,19 @@ class CallPipeline:
 
     async def _end_call(self) -> None:
         """Finalise session in the backend and clean up resources."""
-        summary = await self._agent.get_summary()
+        try:
+            summary = await self._agent.get_summary()
+        except Exception:
+            log.exception("agent_summary_failed", session_id=self.session_id)
+            summary = None
+        # Part 2's agent reports a backend CallOutcome and whether it handed the
+        # caller to staff; other agents (e.g. the stub) fall back to OTHER.
         await self._api.end_call(
             self.session_id,
-            outcome="completed",
+            outcome=getattr(self._agent, "call_outcome", "OTHER"),
             summary=summary,
             language_detected=self._language,
+            escalated_to_human=bool(getattr(self._agent, "escalated", False)),
         )
         await self._api.aclose()
         log.info("pipeline_done", session_id=self.session_id)

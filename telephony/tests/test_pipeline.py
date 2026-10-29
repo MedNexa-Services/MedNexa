@@ -128,7 +128,7 @@ class TestPipelineGreeting:
         mock_api.append_log.assert_called()
         calls = [call.args for call in mock_api.append_log.call_args_list]
         roles = [c[1] for c in calls]
-        assert "assistant" in roles
+        assert "ASSISTANT" in roles  # backend CallRole values are uppercase
 
 
 class TestPipelineUtterance:
@@ -320,3 +320,60 @@ class TestBargeIn:
         )
         await pipeline.run(caller_speaks())
         clear.assert_not_awaited()
+
+
+class TestCallEnd:
+    @pytest.mark.asyncio
+    async def test_end_call_reports_the_agents_outcome(
+        self,
+        mock_vad: MagicMock,
+        mock_stt: MagicMock,
+        mock_tts: MagicMock,
+        mock_api: MagicMock,
+        mock_recorder: MagicMock,
+    ) -> None:
+        agent = StubAgent()
+        agent.call_outcome = "BOOKED"  # type: ignore[attr-defined]
+        agent.escalated = True  # type: ignore[attr-defined]
+
+        async def no_audio() -> AsyncIterator[bytes]:
+            return
+            yield  # type: ignore[misc]
+
+        async def send(chunk: bytes) -> None:
+            pass
+
+        await CallPipeline("sess-end", "+911234567890", send, agent=agent).run(no_audio())
+        kwargs = mock_api.end_call.await_args.kwargs
+        assert kwargs["outcome"] == "BOOKED"
+        assert kwargs["escalated_to_human"] is True
+
+    @pytest.mark.asyncio
+    async def test_agents_without_an_outcome_end_as_other(
+        self,
+        mock_vad: MagicMock,
+        mock_stt: MagicMock,
+        mock_tts: MagicMock,
+        mock_api: MagicMock,
+        mock_recorder: MagicMock,
+    ) -> None:
+        async def no_audio() -> AsyncIterator[bytes]:
+            return
+            yield  # type: ignore[misc]
+
+        async def send(chunk: bytes) -> None:
+            pass
+
+        await CallPipeline("sess-end2", "+911234567890", send, agent=StubAgent()).run(no_audio())
+        assert mock_api.end_call.await_args.kwargs["outcome"] == "OTHER"
+
+
+@pytest.mark.asyncio
+async def test_backend_client_sends_backend_role_values() -> None:
+    from telephony.api_client import BackendClient
+
+    client = BackendClient(base_url="http://test")
+    client._post = AsyncMock()  # type: ignore[method-assign]
+    await client.append_log("s1", "assistant", "hello")
+    assert client._post.await_args.args[1]["role"] == "ASSISTANT"
+    await client.aclose()

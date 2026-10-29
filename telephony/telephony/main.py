@@ -106,7 +106,8 @@ def create_app() -> FastAPI:
 
         await websocket.accept()
         cfg = get_settings()
-        caller_phone = websocket.query_params.get("phone", "test_caller")
+        # Without ?phone=..., the call is logged as from a withheld number.
+        caller_phone = websocket.query_params.get("phone", "anonymous")
 
         async with BackendClient() as client:
             session_id = await client.start_call(cfg.hospital_id, caller_phone)
