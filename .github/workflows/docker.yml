@@ -1,0 +1,126 @@
+name: Docker CI
+
+# Runs when the deployment setup changes: compose file, Dockerfiles, backup scripts, or the
+# dependency files the images are built from.
+on:
+  push:
+    paths:
+      - "docker-compose.yml"
+      - ".env.example"
+      - ".dockerignore"
+      - "scripts/**"
+      - "**/Dockerfile"
+      - "backend/pyproject.toml"
+      - "backend/uv.lock"
+      - "dashboard/package.json"
+      - "dashboard/package-lock.json"
+      - ".github/workflows/docker.yml"
+  pull_request:
+    paths:
+      - "docker-compose.yml"
+      - ".env.example"
+      - ".dockerignore"
+      - "scripts/**"
+      - "**/Dockerfile"
+      - "backend/pyproject.toml"
+      - "backend/uv.lock"
+      - "dashboard/package.json"
+      - "dashboard/package-lock.json"
+      - ".github/workflows/docker.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Compose file & scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compose refuses to start without the required secrets
+        run: |
+          if docker compose config -q 2>/dev/null; then
+            echo "docker compose accepted an empty environment: the required secrets have defaults"
+            exit 1
+          fi
+
+      - name: Compose file is valid with the required secrets set
+        run: docker compose config -q
+        env:
+          POSTGRES_PASSWORD: ci-postgres-password
+          MEDNEXA_JWT_SECRET: ci-jwt-secret-0123456789abcdef0123456789abcdef
+          MEDNEXA_SERVICE_API_KEY: ci-service-key-0123456789abcdef0123456789abcdef
+          MEDNEXA_ADMIN_EMAIL: staff@hospital.example
+          MEDNEXA_ADMIN_PASSWORD: ci-admin-password
+
+      - name: ShellCheck the backup scripts
+        run: shellcheck scripts/*.sh
+
+  stack:
+    name: Build and start the stack
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      POSTGRES_PASSWORD: ci-postgres-password
+      MEDNEXA_JWT_SECRET: ci-jwt-secret-0123456789abcdef0123456789abcdef
+      MEDNEXA_SERVICE_API_KEY: ci-service-key-0123456789abcdef0123456789abcdef
+      MEDNEXA_ADMIN_EMAIL: staff@hospital.example
+      MEDNEXA_ADMIN_PASSWORD: ci-admin-password
+      AUTH_COOKIE_SECURE: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      # The telephony image (torch, ffmpeg) is large and is not started here.
+      - name: Build images and wait until the API and dashboard are healthy
+        run: docker compose up -d --build --wait api dashboard
+
+      - name: Load the demo data
+        run: docker compose --profile demo run --rm seed
+
+      - name: Signing in and loading data through the dashboard
+        run: |
+          set -eu
+          D=localhost:3001
+          test "$(curl -s -o /dev/null -w '%{http_code}' $D/dashboard)" = 307          # needs a session
+          test "$(curl -s -o /dev/null -w '%{http_code}' 127.0.0.1:8000/api/v1/doctors)" = 401  # API needs a token
+          bad=$(curl -s -o /dev/null -w '%{http_code}' -X POST $D/api/auth/login -H 'content-type: application/json' \
+            -d '{"email":"admin@hospital.com","password":"admin123"}')
+          test "$bad" = 401                                                            # no demo credentials
+          cookie=$(curl -s -i -X POST $D/api/auth/login -H 'content-type: application/json' \
+            -d "{\"email\":\"$MEDNEXA_ADMIN_EMAIL\",\"password\":\"$MEDNEXA_ADMIN_PASSWORD\"}" \
+            | grep -i '^set-cookie' | sed -E 's/^[^:]*: *([^;]*);.*/\1/' | tr -d '\r')
+          test -n "$cookie"
+          doctors=$(curl -s -H "cookie: $cookie" "$D/api/backend/doctors?limit=100" \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin)["total"])')
+          test "$doctors" -gt 0
+
+      - name: Backup and restore round trip
+        run: |
+          set -eu
+          export BACKUP_DIR="$RUNNER_TEMP/backups"
+          ./scripts/backup.sh
+          test "$(stat -c '%a' "$BACKUP_DIR"/mednexa_backup_*.sql.gz)" = 600
+          before=$(docker exec mednexa-db psql -U mednexa -d mednexa -tAc 'select count(*) from doctor')
+          docker exec mednexa-db psql -U mednexa -d mednexa -qc 'delete from appointment; delete from doctor'
+          test "$(docker exec mednexa-db psql -U mednexa -d mednexa -tAc 'select count(*) from doctor')" = 0
+          ./scripts/restore.sh "$BACKUP_DIR"/mednexa_backup_*.sql.gz -y
+          after=$(docker exec mednexa-db psql -U mednexa -d mednexa -tAc 'select count(*) from doctor')
+          test "$before" = "$after"
+          # a failing dump must fail the script and leave existing backups alone
+          if POSTGRES_USER=nobody ./scripts/backup.sh; then echo "a failed dump reported success"; exit 1; fi
+          ls "$BACKUP_DIR"/mednexa_backup_*.sql.gz > /dev/null
+
+      - name: Container logs (on failure)
+        if: failure()
+        run: docker compose logs --no-color --tail=100
+
+      - name: Tear down
+        if: always()
+        run: docker compose --profile demo down -v
