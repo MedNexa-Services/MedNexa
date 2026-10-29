@@ -1,8 +1,14 @@
 from datetime import timedelta
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.core.security import create_access_token, decode_access_token, hash_password, verify_password
+from app.core.security import (
+    create_access_token,
+    decode_access_token,
+    hash_password,
+    verify_password,
+)
 from app.main import create_app
 
 

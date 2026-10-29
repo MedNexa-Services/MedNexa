@@ -11,7 +11,7 @@ import hashlib
 import hmac
 import json
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 
@@ -33,6 +33,7 @@ def create_access_token(
     """Create a signed HS256 JWT token."""
     try:
         from app.config import get_settings
+
         settings = get_settings()
         secret = settings.jwt_secret
         expire_minutes = settings.jwt_access_token_expire_minutes
@@ -40,11 +41,8 @@ def create_access_token(
         secret = "mednexa-super-secret-jwt-signing-key-32bytes-minimum"
         expire_minutes = 120
 
-    now = datetime.now(timezone.utc)
-    if expires_delta:
-        expire = now + expires_delta
-    else:
-        expire = now + timedelta(minutes=expire_minutes)
+    now = datetime.now(UTC)
+    expire = now + expires_delta if expires_delta else now + timedelta(minutes=expire_minutes)
 
     payload = dict(data)
     payload.update({
@@ -81,6 +79,7 @@ def decode_access_token(token: str) -> dict[str, Any]:
     """
     try:
         from app.config import get_settings
+
         secret = get_settings().jwt_secret
     except Exception:
         secret = "mednexa-super-secret-jwt-signing-key-32bytes-minimum"
