@@ -27,6 +27,7 @@ caller's audio stream (Twilio / Asterisk bridge provides this).
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from collections.abc import AsyncIterator, Callable, Awaitable
 from typing import Any
@@ -50,6 +51,9 @@ ClearAudioFn = Callable[[], Awaitable[None]]
 
 # Pipeline audio: 16 kHz mono int16 -> 32000 bytes per second of playback.
 PCM_BYTES_PER_SECOND = 16000 * 2
+
+# Closing phrases (Part 2's agent says these only in its final reply).
+_FAREWELL = re.compile(r"\bgood\s?-?bye\b|\bbye\b|अलविदा|धन्यवाद[\s,।!]*नमस्ते", re.IGNORECASE)
 
 # Maximum buffer for one utterance (prevents runaway memory if VAD misses end)
 MAX_UTTERANCE_BYTES = 16000 * 2 * 30  # 30 seconds of 16 kHz int16
@@ -327,11 +331,6 @@ class CallPipeline:
 
     @staticmethod
     def _is_farewell(text: str) -> bool:
-        """Heuristic: did the agent say goodbye?"""
-        farewells = {
-            "goodbye", "bye", "have a great day", "have a nice day",
-            "take care", "thank you for calling",
-            "नमस्ते", "धन्यवाद", "अलविदा",
-        }
-        lower = text.lower()
-        return any(f in lower for f in farewells)
+        """Did the agent close the call? Only explicit closing phrases count: words
+        like "धन्यवाद" (thank you) or "take care" also occur mid-conversation."""
+        return bool(_FAREWELL.search(text))

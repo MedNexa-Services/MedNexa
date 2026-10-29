@@ -377,3 +377,19 @@ async def test_backend_client_sends_backend_role_values() -> None:
     await client.append_log("s1", "assistant", "hello")
     assert client._post.await_args.args[1]["role"] == "ASSISTANT"
     await client.aclose()
+
+
+@pytest.mark.parametrize(
+    "reply, ends_call",
+    [
+        ("Thank you for calling, goodbye!", True),
+        ("Okay, bye.", True),
+        ("धन्यवाद, नमस्ते!", True),
+        ("धन्यवाद, आपकी अपॉइंटमेंट बुक हो गई है। और कुछ?", False),
+        ("Take care. Your token number is 3. Anything else?", False),
+        ("Thank you for calling MedNexa. How can I help?", False),
+        ("Dr. Sharma is nearby in room 4.", False),
+    ],
+)
+def test_farewell_detection(reply: str, ends_call: bool) -> None:
+    assert CallPipeline._is_farewell(reply) is ends_call
