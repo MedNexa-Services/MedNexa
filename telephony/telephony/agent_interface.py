@@ -44,6 +44,16 @@ class AgentInterface(Protocol):
         """Return a brief summary of what was accomplished on this call."""
         ...
 
+    @property
+    def call_outcome(self) -> str:
+        """A valid backend CallOutcome string (e.g. BOOKED, INFO_PROVIDED, OTHER)."""
+        ...
+
+    @property
+    def escalated(self) -> bool:
+        """True if the caller was transferred to staff or the model failed."""
+        ...
+
 
 class StubAgent:
     """Minimal stub used during development / unit tests.
@@ -75,3 +85,11 @@ class StubAgent:
 
     async def get_summary(self) -> str | None:
         return f"Test call completed after {self._turn} turn(s)."
+
+    @property
+    def call_outcome(self) -> str:
+        return "OTHER"
+
+    @property
+    def escalated(self) -> bool:
+        return False

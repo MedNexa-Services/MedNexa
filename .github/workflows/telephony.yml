@@ -1,0 +1,47 @@
+name: Telephony CI
+
+on:
+  push:
+    paths:
+      - "telephony/**"
+      - "agent/**"
+      - "backend/**"
+  pull_request:
+    paths:
+      - "telephony/**"
+  workflow_dispatch:
+
+concurrency:
+  group: telephony-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: telephony
+
+jobs:
+  quality:
+    name: Lint & tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system audio libraries
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg libsndfile1
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv pip install --system -e ../backend -e ../agent -e ".[dev]"
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Run unit tests
+        run: uv run pytest

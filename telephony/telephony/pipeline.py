@@ -284,14 +284,24 @@ class CallPipeline:
     async def _end_call(self) -> None:
         """Finalise session in the backend and clean up resources."""
         summary = await self._agent.get_summary()
+        outcome = getattr(self._agent, "call_outcome", "OTHER") or "OTHER"
+        escalated = bool(getattr(self._agent, "escalated", False))
+        lang = getattr(self._agent, "language", self._language) or self._language
+
         await self._api.end_call(
             self.session_id,
-            outcome="completed",
+            outcome=outcome,
             summary=summary,
-            language_detected=self._language,
+            language_detected=lang,
+            escalated_to_human=escalated,
         )
         await self._api.aclose()
-        log.info("pipeline_done", session_id=self.session_id)
+        log.info(
+            "pipeline_done",
+            session_id=self.session_id,
+            outcome=outcome,
+            escalated=escalated,
+        )
 
     # ── helpers ───────────────────────────────────────────────────────────────
 

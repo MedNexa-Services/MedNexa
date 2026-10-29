@@ -20,8 +20,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from app.api.deps import get_db, require_staff
 from app.config import get_settings
-from app.database import get_db
 from app.main import create_app
 from app.models import Base
 
@@ -75,5 +75,10 @@ async def client(session_factory: async_sessionmaker[AsyncSession]) -> AsyncIter
             yield session
 
     app.dependency_overrides[get_db] = _test_db
+    app.dependency_overrides[require_staff] = lambda: {
+        "sub": "admin@hospital.com",
+        "role": "Hospital Staff",
+        "name": "Dr. Admin",
+    }
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c

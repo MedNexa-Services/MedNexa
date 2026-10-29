@@ -10,6 +10,17 @@ export const apiClient = axios.create({
   timeout: 15000,
 });
 
+// Request interceptor: attach JWT token if available
+apiClient.interceptors.request.use((config) => {
+  if (typeof window !== "undefined") {
+    const token = localStorage.getItem("mednexa_staff_token");
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  }
+  return config;
+});
+
 // Response interceptor: unwrap data and normalize errors
 apiClient.interceptors.response.use(
   (response) => response,

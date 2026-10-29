@@ -30,6 +30,7 @@ from typing import AsyncIterator
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import PlainTextResponse
 
+from telephony.agent_interface import AgentInterface, StubAgent
 from telephony.api_client import BackendClient
 from telephony.config import get_settings
 from telephony.logging_setup import get_logger
@@ -247,7 +248,17 @@ async def stream_websocket(websocket: WebSocket, call_sid: str) -> None:
         receive_task.cancel()
         return
 
-    pipeline = CallPipeline(session_id, caller_phone, send_audio)
+    agent: AgentInterface
+    try:
+        from agent import MedNexaAgent
+
+        agent = MedNexaAgent(caller_phone, cfg.hospital_id)
+        log.info("agent_instantiated", agent="MedNexaAgent", caller=caller_phone)
+    except Exception as exc:
+        log.warning("failed_to_initialize_mednexa_agent_falling_back", error=str(exc))
+        agent = StubAgent(caller_phone, cfg.hospital_id)
+
+    pipeline = CallPipeline(session_id, caller_phone, send_audio, agent=agent)
 
     pipeline_task = asyncio.create_task(pipeline.run(audio_generator()))
 

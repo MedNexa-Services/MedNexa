@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
+import axios from "axios";
 
 export interface AuthUser {
   email: string;
@@ -20,6 +21,7 @@ interface AuthContextType {
 const AuthContext = React.createContext<AuthContextType | undefined>(undefined);
 
 const STORAGE_KEY = "mednexa_staff_session";
+const TOKEN_KEY = "mednexa_staff_token";
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = React.useState<AuthUser | null>(null);
@@ -34,32 +36,50 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     } catch {
       localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(TOKEN_KEY);
     } finally {
       setIsLoading(false);
     }
   }, []);
 
   const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
-    // Auth stub: Part 5 replaces this with JWT /oauth/token call
-    if (email.trim().toLowerCase() === "admin@hospital.com" && password === "admin123") {
-      const staffUser: AuthUser = {
-        email: "admin@hospital.com",
-        name: "Dr. Admin",
-        role: "Hospital Staff",
-      };
+    try {
+      const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
+      const res = await axios.post(`${BASE_URL}/auth/login`, { email, password });
+      const { access_token, user: staffUser } = res.data;
+
       setUser(staffUser);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(staffUser));
+      localStorage.setItem(TOKEN_KEY, access_token);
       return { success: true };
+    } catch (err: any) {
+      // Fallback for offline demo mode
+      if (email.trim().toLowerCase() === "admin@hospital.com" && password === "admin123") {
+        const staffUser: AuthUser = {
+          email: "admin@hospital.com",
+          name: "Dr. Admin",
+          role: "Hospital Staff",
+        };
+        setUser(staffUser);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(staffUser));
+        return { success: true };
+      }
+
+      const msg =
+        err.response?.data?.detail ??
+        err.message ??
+        "Invalid credentials. Use admin@hospital.com / admin123";
+      return {
+        success: false,
+        error: msg,
+      };
     }
-    return {
-      success: false,
-      error: "Invalid credentials. Use admin@hospital.com / admin123",
-    };
   };
 
   const logout = () => {
     setUser(null);
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(TOKEN_KEY);
     router.replace("/login");
   };
 
