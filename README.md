@@ -17,16 +17,16 @@ MedNexa is an autonomous, bilingual (English & Hindi) voice-enabled AI hospital 
 │                                                                                        │
 │   ┌─────────────────────┐       ┌──────────────────────┐       ┌───────────────────┐  │
 │   │ Telephony Gateway   │ ────▶ │ AI Agent Core        │ ────▶ │ Database Layer    │  │
-│   │ (Twilio / VAD /     │ ◀──── │ (LangGraph + Tools   │ ◀──── │ (PostgreSQL 16    │  │
-│   │  Whisper STT / TTS) │       │  ModelRouter:        │       │  + Redis Cache)   │  │
-│   │  Port: 8001         │       │  Ollama / Groq / OAI)│       │  Port: 5434, 6379 │  │
+│   │ (Twilio / VAD /     │ ◀──── │ (LangGraph + Tools   │ ◀──── │ (PostgreSQL 16)   │  │
+│   │  Whisper STT / TTS) │       │  ModelRouter:        │       │                   │  │
+│   │  Port: 8001         │       │  Ollama / Groq / OAI)│       │  Port: 5434 (local)│ │
 │   └─────────────────────┘       └──────────────────────┘       └─────────▲─────────┘  │
 │                                                                          │            │
 │   ┌─────────────────────┐                                                │            │
 │   │ Next.js Dashboard   │ ───────────────────────────────────────────────┤            │
-│   │ (Port: 3001)        │              REST API (FastAPI)                │            │
-│   └─────────────────────┘              Bearer JWT Auth                   │            │
-│                                        Port: 8000                        │            │
+│   │ (Port: 3001)        │   same-origin gateway, JWT in httpOnly cookie  │            │
+│   └─────────────────────┘              REST API (FastAPI), JWT auth      │            │
+│                                        Port: 8000 (localhost only)       │            │
 │                                 ┌──────────────────────┐                 │            │
 │                                 │ FastAPI Backend API  │ ────────────────┘            │
 │                                 └──────────────────────┘                              │
@@ -39,12 +39,12 @@ MedNexa is an autonomous, bilingual (English & Hindi) voice-enabled AI hospital 
 
 | Service | Technology | Port (Host) | Description |
 |---|---|---|---|
-| **Backend API** | FastAPI / Python 3.11 | `8000` | REST API, Business logic, JWT auth, Database contracts |
-| **Admin Dashboard** | Next.js 16 / TypeScript | `3001` (or `3000` dev) | Staff portal for doctors, rosters, appointments, logs |
-| **Telephony Gateway** | FastAPI / Silero / Whisper | `8001` | Audio streaming, VAD, STT, Edge/Piper TTS, Twilio |
-| **Database** | PostgreSQL 16 | `5434` (ext) / `5432` (int) | Appointments, Doctors, Schedules, Overrides, Call logs |
-| **Cache & Queue** | Redis 7 | `6379` | Session states, rate limiting, and caching |
-| **Local LLM** | Ollama | `11434` | Local inference engine (`llama3.1:8b`) |
+| **Backend API** | FastAPI / Python 3.11 | `127.0.0.1:8000` | REST API, business logic, JWT auth. Local access only; staff use the dashboard |
+| **Admin Dashboard** | Next.js 16 / TypeScript | `3001` | Staff portal. Its server signs in to the API and proxies browser requests to it |
+| **Telephony Gateway** | FastAPI / Silero / Whisper | `8001` | Audio streaming, VAD, STT, Edge/Piper TTS, Twilio. Put an HTTPS proxy in front |
+| **Database** | PostgreSQL 16 | `127.0.0.1:5434` | Appointments, doctors, schedules, call logs (local access only) |
+| **Local LLM** | Ollama | internal | Local inference (`llama3.1:8b`); no published port because Ollama has no authentication |
+
 
 ---
 
@@ -55,42 +55,58 @@ MedNexa is an autonomous, bilingual (English & Hindi) voice-enabled AI hospital 
 - Git
 
 ### 2. Configure Environment
-Copy the unified configuration file:
 ```bash
 cp .env.example .env
 ```
-*(Adjust any secret keys or cloud provider keys like `MEDNEXA_AGENT_GROQ_API_KEY` if running in cloud fallback mode).*
+Fill in every value marked **REQUIRED** (generate random secrets with `openssl rand -hex 32`):
+`POSTGRES_PASSWORD`, `MEDNEXA_JWT_SECRET`, `MEDNEXA_SERVICE_API_KEY`, `MEDNEXA_ADMIN_EMAIL`
+and `MEDNEXA_ADMIN_PASSWORD`. There are **no default credentials or keys**: `docker compose`
+refuses to start until they are set, and so does the API. Cloud-fallback keys such as
+`MEDNEXA_AGENT_GROQ_API_KEY` are optional.
 
-### 3. Start the Complete Stack
-Run all services with a single command:
+### 3. Start the Stack
 ```bash
 docker compose up --build -d
 ```
-Docker Compose will automatically:
-1. Launch PostgreSQL 16 and Redis 7 and wait for healthchecks to pass.
-2. Run the ephemeral `migration` container executing `alembic upgrade head` and seeding initial hospital data via `python -m scripts.seed`.
-3. Launch the FastAPI Backend on port `8000`.
-4. Launch the Next.js Dashboard UI on port `3001`.
-5. Launch the Voice/Telephony Gateway on port `8001`.
-6. Launch the Ollama LLM container on port `11434`.
+Compose starts PostgreSQL, applies the migrations (a one-off `migration` container), then
+starts the API (waits until healthy), the dashboard and the telephony gateway. The sample
+data is **not** loaded automatically; to try the system with a demo hospital:
+```bash
+docker compose --profile demo run --rm seed
+```
 
-### 4. Access the Applications
-- **Admin Dashboard**: [http://localhost:3001](http://localhost:3001)
-  - **Email**: `admin@hospital.com`
-  - **Password**: `admin123`
-- **Backend API Docs (Swagger)**: [http://localhost:8000/docs](http://localhost:8000/docs)
-- **API Health Check**: [http://localhost:8000/health](http://localhost:8000/health)
-- **Telephony Health Check**: [http://localhost:8001/health](http://localhost:8001/health)
+### 4. Finish Setup
+1. **Sign in** at [http://localhost:3001](http://localhost:3001) with `MEDNEXA_ADMIN_EMAIL` / `MEDNEXA_ADMIN_PASSWORD`.
+   Over plain HTTP from another machine, set `AUTH_COOKIE_SECURE=false` in `.env`
+   (HTTPS through a reverse proxy is strongly preferred).
+2. **Telephony needs a hospital:** create it in the dashboard (or run the demo seed), copy its
+   id into `MEDNEXA_TEL_HOSPITAL_ID` in `.env`, then `docker compose up -d telephony`.
+   `http://localhost:8001/health` reports `hospital_configured` and `backend_connected`.
+3. **Local model (optional):** `docker compose exec ollama ollama pull llama3.1:8b`.
+4. **Twilio:** set `MEDNEXA_TEL_PUBLIC_URL` and the Twilio credentials in `.env`; with an auth
+   token set, the webhook only accepts requests signed by Twilio.
+
+Useful addresses: dashboard `http://localhost:3001`, API docs `http://localhost:8000/docs`,
+API health `http://localhost:8000/api/v1/health`, telephony health `http://localhost:8001/health`.
 
 ---
 
 ## 🔐 Security & Authentication (Task 5.3)
 
-MedNexa implements standard HS256 JWT Bearer token authentication for hospital staff:
-- **Login Endpoint**: `POST /api/v1/auth/login` returns an access token and user metadata.
-- **Current User Profile**: `GET /api/v1/auth/me` verifies the Bearer token.
-- **Axios Interceptor**: The Next.js dashboard automatically injects `Authorization: Bearer <token>` into all requests.
-- **Correlation ID**: All requests pass an `X-Correlation-ID` header for distributed tracing across logs.
+- **One place checks credentials: the backend.** `POST /api/v1/auth/login` verifies the staff
+  account from `MEDNEXA_ADMIN_EMAIL` / `MEDNEXA_ADMIN_PASSWORD` (plain or a PBKDF2 hash from
+  `python -m app.core.security`) and returns an HS256 JWT. Every other route needs it, except
+  `/api/v1/health`.
+- **The dashboard never exposes the token.** Its server signs in on the browser's behalf, keeps the
+  JWT in an `httpOnly` cookie, and forwards browser requests (`/api/backend/*`) to the API with it.
+  Cross-site writes are refused.
+- **No defaults.** The API refuses to start without a 32+ character `MEDNEXA_JWT_SECRET` and the
+  admin credentials. Sign-in is throttled (5 wrong passwords per account per 5 minutes).
+- **Telephony uses a separate service key** (`MEDNEXA_SERVICE_API_KEY`) that is accepted on the
+  `/calls` routes only.
+- **Network exposure:** only the dashboard (3001) and the telephony webhook (8001) listen on all
+  interfaces; the API and database are bound to localhost and Ollama is internal.
+- `X-Correlation-ID` is echoed (if it is short and uses safe characters) for tracing across logs.
 
 ---
 
@@ -107,16 +123,24 @@ Automated backup and restore scripts are located in `scripts/`:
   ```powershell
   .\scripts\backup.ps1
   ```
-Backups are saved to `./backups/mednexa_backup_<timestamp>.sql.gz` and automatically pruned after 7 days retention.
+Backups are saved to `./backups/mednexa_backup_<timestamp>.sql.gz` (readable by you only), made
+inside the database container and verified before they replace anything; a failed run leaves
+existing backups untouched, and backups older than 7 days (`RETENTION_DAYS`) are pruned only
+after a successful one. They contain patient data: copy them off the machine and encrypt them
+(e.g. `gpg --symmetric`).
 
 ### Restoring from Backup
+Stop the services that use the database first (`docker compose stop api telephony dashboard`) and
+start them again afterwards. A restore replaces the database contents in a single transaction: if
+anything fails, nothing changes.
+
 - **Linux / macOS**:
   ```bash
-  ./scripts/restore.sh ./backups/mednexa_backup_<timestamp>.sql.gz
+  ./scripts/restore.sh ./backups/mednexa_backup_<timestamp>.sql.gz      # add -y to skip the prompt
   ```
 - **Windows (PowerShell)**:
   ```powershell
-  .\scripts\restore.ps1 -BackupFile .\backups\mednexa_backup_<timestamp>.sql.gz
+  .\scripts\restore.ps1 -BackupFile .\backups\mednexa_backup_<timestamp>.sql.gz   # add -Yes to skip the prompt
   ```
 
 ---
@@ -127,6 +151,8 @@ Backups are saved to `./backups/mednexa_backup_<timestamp>.sql.gz` and automatic
 ```bash
 cd backend
 uv sync
+# set MEDNEXA_JWT_SECRET, MEDNEXA_ADMIN_EMAIL and MEDNEXA_ADMIN_PASSWORD (see backend/.env.example),
+# or MEDNEXA_AUTH_ENABLED=false for local work without login
 uv run alembic upgrade head
 uv run python -m scripts.seed
 uv run uvicorn app.main:app --port 8000 --reload
@@ -150,7 +176,7 @@ uv run uvicorn telephony.main:app --port 8001 --reload
 ```bash
 cd dashboard
 npm install
-npm run dev
+BACKEND_URL=http://localhost:8000 npm run dev
 ```
 
 ---
@@ -161,7 +187,8 @@ Continuous Integration workflows run via GitHub Actions on every pull request an
 - **`backend.yml`**: Ruff linting, formatting, mypy static analysis, Alembic migration verification, and Postgres pytest suite.
 - **`agent.yml`**: Agent harness, LangGraph evaluation, tool-calling tests.
 - **`dashboard.yml`**: ESLint, TypeScript compilation (`tsc --noEmit`), Next.js production build.
-- **`telephony.yml`**: VAD, STT, audio streaming, and voice pipeline tests.
+- **`telephony.yml`**: ruff and the voice pipeline tests (Whisper, Silero and TTS are mocked).
+- **`docker.yml`**: validates `docker-compose.yml`, lints the backup scripts, builds the API and dashboard images and starts the stack to check it comes up healthy.
 
 ---
 
