@@ -45,10 +45,12 @@ def create_access_token(
     expire = now + expires_delta if expires_delta else now + timedelta(minutes=expire_minutes)
 
     payload = dict(data)
-    payload.update({
-        "iat": int(now.timestamp()),
-        "exp": int(expire.timestamp()),
-    })
+    payload.update(
+        {
+            "iat": int(now.timestamp()),
+            "exp": int(expire.timestamp()),
+        }
+    )
 
     # Header
     header = {"alg": "HS256", "typ": "JWT"}
