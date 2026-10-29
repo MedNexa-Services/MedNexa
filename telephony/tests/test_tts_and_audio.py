@@ -20,16 +20,15 @@ from telephony.tts import (
 
 
 class TestTTSEngine:
-    def test_empty_text_returns_empty(self) -> None:
+    @pytest.mark.asyncio
+    async def test_empty_text_returns_empty(self) -> None:
         engine = TTSEngine.__new__(TTSEngine)
         engine._prefer_piper = False
         engine._piper = MagicMock()
         engine._edge = MagicMock()
         engine._piper_ok = False
 
-        import asyncio
-        result = asyncio.get_event_loop().run_until_complete(engine.speak("", "en"))
-        assert result == b""
+        assert await engine.speak("", "en") == b""
 
     @pytest.mark.asyncio
     async def test_falls_back_to_edge_when_piper_unavailable(self) -> None:
