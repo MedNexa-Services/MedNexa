@@ -1,20 +1,19 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_COOKIE, getAuthSecret, verifySessionToken } from "@/lib/auth/session";
+import { TOKEN_COOKIE, looksUnexpired } from "@/lib/auth/token";
 
-// Every page except /login needs a valid, unexpired, correctly signed session
-// cookie. (Sessions are checked server-side here; the client-side AuthContext
-// only mirrors the result for the UI.)
-export async function proxy(request: NextRequest) {
-  const secret = getAuthSecret();
-  const user = secret
-    ? await verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value, secret)
-    : null;
-  if (user) {
+// Pages need a session cookie whose token hasn't expired; otherwise the user is sent to
+// /login (and API calls get a 401). The backend still verifies the token's signature on
+// every API request, so this is a convenience check, not the security boundary.
+export function proxy(request: NextRequest) {
+  const token = request.cookies.get(TOKEN_COOKIE)?.value;
+  if (looksUnexpired(token)) {
     return NextResponse.next();
   }
-  const login = new URL("/login", request.url);
-  const response = NextResponse.redirect(login);
-  response.cookies.delete(SESSION_COOKIE);
+  if (request.nextUrl.pathname.startsWith("/api/")) {
+    return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+  }
+  const response = NextResponse.redirect(new URL("/login", request.url));
+  if (token) response.cookies.delete(TOKEN_COOKIE);
   return response;
 }
 

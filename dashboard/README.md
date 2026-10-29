@@ -42,14 +42,13 @@ cp .env.example .env.local
 
 Then edit `.env.local`:
 ```env
-# Point to your MedNexa FastAPI backend API root (as seen from the browser)
-NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
-
-# Staff sign-in (server-side only). Sign-in is disabled until all three are set.
-AUTH_SECRET=<32+ random characters, e.g. `openssl rand -hex 32`>
-STAFF_EMAIL=you@hospital.example
-STAFF_PASSWORD=<a strong password>
+# Where the dashboard server reaches the backend API (server-side only)
+BACKEND_URL=http://localhost:8000
 ```
+
+The browser only talks to the dashboard itself: requests to `/api/backend/*` are
+forwarded to `BACKEND_URL/api/v1/*` with the staff token, so staff machines don't need
+to reach the API directly.
 
 ### 2. Install Dependencies
 
@@ -65,11 +64,12 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-Sign in with the `STAFF_EMAIL` / `STAFF_PASSWORD` you configured. Sessions are signed,
-httpOnly cookies checked on the server (`proxy.ts`) and last 8 hours. The cookie is
-`Secure` in production; if the dashboard is served over plain HTTP on a hospital LAN,
-set `AUTH_COOKIE_SECURE=false` (HTTPS is strongly preferred). Part 5 replaces this
-single account with backend-issued JWTs (plan task 5.3).
+Sign in with the staff account configured on the **backend** (`MEDNEXA_ADMIN_EMAIL` /
+`MEDNEXA_ADMIN_PASSWORD`; see `backend/README.md`). The dashboard server signs in on
+the browser's behalf and keeps the backend's JWT in an httpOnly cookie, so the token is
+never visible to page JavaScript. The cookie is `Secure` in production; if the dashboard
+is served over plain HTTP on a hospital LAN, set `AUTH_COOKIE_SECURE=false` (HTTPS is
+strongly preferred).
 
 ---
 
@@ -102,7 +102,7 @@ A multi-stage `Dockerfile` is provided for containerized deployments:
 docker build -t mednexa-dashboard:latest .
 
 # Run container on port 3000
-docker run -p 3000:3000 -e NEXT_PUBLIC_API_URL=http://backend:8000/api/v1 mednexa-dashboard:latest
+docker run -p 3000:3000 -e BACKEND_URL=http://backend:8000 mednexa-dashboard:latest
 ```
 
 ---

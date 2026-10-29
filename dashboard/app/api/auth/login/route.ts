@@ -1,64 +1,59 @@
 import { NextResponse } from "next/server";
-import {
-  SESSION_COOKIE,
-  SESSION_TTL_SECONDS,
-  createSessionToken,
-  getAuthSecret,
-  safeEqual,
-  type StaffUser,
-} from "@/lib/auth/session";
+import { TOKEN_COOKIE, apiUrl, cookieOptions } from "@/lib/auth/token";
 
-// Staff credentials are checked here, on the server; they never reach the browser.
-// Part 5 replaces this single staff account with backend-issued JWTs (plan task 5.3).
+// Signs in against the backend (the only place credentials are checked) and keeps the
+// JWT it returns in an httpOnly cookie. The browser only ever receives the user's profile.
 export async function POST(request: Request) {
-  const secret = getAuthSecret();
-  const staffEmail = process.env.STAFF_EMAIL;
-  const staffPassword = process.env.STAFF_PASSWORD;
-  if (!secret || !staffEmail || !staffPassword) {
-    return NextResponse.json(
-      {
-        error:
-          "Sign-in is not configured. Set AUTH_SECRET (32+ characters), STAFF_EMAIL and STAFF_PASSWORD on the dashboard server.",
-      },
-      { status: 503 }
-    );
-  }
-
-  let email = "";
-  let password = "";
+  let body: { email?: unknown; password?: unknown };
   try {
-    const body = (await request.json()) as { email?: unknown; password?: unknown };
-    email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
-    password = typeof body.password === "string" ? body.password : "";
+    body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });
   }
-
-  // Compare both fields every time so the response time doesn't reveal which was wrong.
-  const [emailOk, passwordOk] = await Promise.all([
-    safeEqual(email, staffEmail.trim().toLowerCase()),
-    safeEqual(password, staffPassword),
-  ]);
-  if (!emailOk || !passwordOk) {
-    return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
+  if (typeof body.email !== "string" || typeof body.password !== "string") {
+    return NextResponse.json({ error: "Email and password are required" }, { status: 400 });
   }
 
-  const user: StaffUser = {
-    email: staffEmail,
-    name: process.env.STAFF_NAME || "Hospital Staff",
-    role: "Hospital Staff",
+  // Pass the browser's address along so the backend throttles per person, not per dashboard.
+  const forwarded = request.headers.get("x-forwarded-for");
+  let upstream: Response;
+  try {
+    upstream = await fetch(apiUrl("auth/login"), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(forwarded ? { "x-forwarded-for": forwarded } : {}),
+      },
+      body: JSON.stringify({ email: body.email, password: body.password }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch {
+    return NextResponse.json({ error: "The backend is not reachable" }, { status: 502 });
+  }
+
+  const data = (await upstream.json().catch(() => ({}))) as {
+    access_token?: string;
+    expires_in?: number;
+    user?: unknown;
+    detail?: unknown;
   };
-  const response = NextResponse.json({ user });
-  response.cookies.set(SESSION_COOKIE, await createSessionToken(user, secret), {
-    httpOnly: true,
-    // Browsers drop Secure cookies on plain HTTP; set AUTH_COOKIE_SECURE=false only for
-    // an HTTP-only hospital LAN (HTTPS is strongly preferred, see plan §5 security).
-    secure: process.env.AUTH_COOKIE_SECURE
-      ? process.env.AUTH_COOKIE_SECURE === "true"
-      : process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: SESSION_TTL_SECONDS,
-  });
+  if (!upstream.ok || !data.access_token || !data.user) {
+    const message =
+      upstream.status === 401
+        ? "Incorrect email or password"
+        : typeof data.detail === "string"
+          ? data.detail
+          : upstream.status === 422
+            ? "Enter a valid email address"
+            : "Sign-in failed";
+    const headers: Record<string, string> = {};
+    const retryAfter = upstream.headers.get("retry-after");
+    if (retryAfter) headers["Retry-After"] = retryAfter;
+    return NextResponse.json({ error: message }, { status: upstream.status || 502, headers });
+  }
+
+  const response = NextResponse.json({ user: data.user });
+  response.cookies.set(TOKEN_COOKIE, data.access_token, cookieOptions(data.expires_in ?? 7200));
   return response;
 }

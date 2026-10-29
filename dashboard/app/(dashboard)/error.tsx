@@ -39,7 +39,7 @@ export default function DashboardError({
         <div className="p-3 bg-muted/40 rounded-lg text-left text-[11px] text-muted-foreground space-y-1">
           <span className="font-semibold block text-foreground">Suggested Troubleshooting:</span>
           <ul className="list-disc list-inside space-y-0.5">
-            <li>Verify FastAPI backend is running at <code>http://localhost:8000</code></li>
+            <li>Verify the backend is running and the dashboard server&apos;s <code>BACKEND_URL</code> points to it</li>
             <li>Check network connectivity or reload the page</li>
           </ul>
         </div>

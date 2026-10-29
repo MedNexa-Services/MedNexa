@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { SESSION_COOKIE } from "@/lib/auth/session";
+import { TOKEN_COOKIE, cookieOptions } from "@/lib/auth/token";
 
 export async function POST() {
   const response = NextResponse.json({ ok: true });
-  response.cookies.set(SESSION_COOKIE, "", { httpOnly: true, path: "/", maxAge: 0 });
+  response.cookies.set(TOKEN_COOKIE, "", cookieOptions(0));
   return response;
 }

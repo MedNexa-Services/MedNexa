@@ -12,7 +12,6 @@ import {
   BarChart3,
   Settings,
   Bot,
-  ExternalLink,
   HeartPulse,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -169,19 +168,6 @@ export function Sidebar({ onClose }: SidebarProps) {
             Ready for incoming bilingual calls via local AI stack.
           </p>
         </div>
-
-        <a
-          href="http://localhost:8000/docs"
-          target="_blank"
-          rel="noreferrer"
-          className="flex items-center justify-between w-full px-3 py-2 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-sidebar-accent transition-colors"
-        >
-          <span className="flex items-center gap-1.5">
-            <span>FastAPI Docs</span>
-            <span className="text-[10px] px-1 py-0.2 bg-muted rounded font-mono">v1</span>
-          </span>
-          <ExternalLink className="w-3.5 h-3.5" />
-        </a>
       </div>
     </aside>
   );
