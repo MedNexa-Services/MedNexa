@@ -1,9 +1,7 @@
-"""Call session and transcript storage (written by Part 3's call pipeline)."""
-
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import DomainValidationError, NotFound
@@ -19,15 +17,12 @@ from app.schemas.call import (
 from app.services.common import paginate
 from app.services.hospital_service import get_hospital
 
-# Turns that count towards total_turns (tool/system entries are bookkeeping).
 _CONVERSATION_ROLES = {CallRole.USER, CallRole.ASSISTANT}
 
 
 async def _get_session(
     db: AsyncSession, session_id: uuid.UUID, *, lock: bool = False
 ) -> CallSession:
-    """With lock=True the row is locked (FOR UPDATE) until commit, so appending a
-    log and ending the call can't interleave and leave logs on an ended call."""
     session = await db.get(CallSession, session_id, with_for_update=lock, populate_existing=lock)
     if session is None:
         raise NotFound("Call session not found")
@@ -80,12 +75,27 @@ async def end_call(db: AsyncSession, session_id: uuid.UUID, data: CallSessionEnd
 
 
 async def purge_calls_older_than(db: AsyncSession, days: int) -> int:
-    """Delete call sessions (and, by cascade, their logs) that started more than
-    `days` days ago. Returns how many sessions were deleted."""
     if days < 1:
         raise ValueError("days must be at least 1")
     cutoff = datetime.now(UTC) - timedelta(days=days)
     result = await db.execute(delete(CallSession).where(CallSession.call_start < cutoff))
+    await db.commit()
+    return result.rowcount or 0  # type: ignore[attr-defined]
+
+
+async def close_stale_calls(db: AsyncSession, minutes: int = 30) -> int:
+    cutoff = datetime.now(UTC) - timedelta(minutes=minutes)
+    last_said = (
+        select(func.max(CallLog.timestamp)).where(CallLog.session_id == CallSession.id)
+    ).scalar_subquery()
+    result = await db.execute(
+        update(CallSession)
+        .where(CallSession.call_end.is_(None), CallSession.call_start < cutoff)
+        .values(
+            call_end=func.coalesce(last_said, CallSession.call_start),
+            call_outcome=func.coalesce(CallSession.call_outcome, CallOutcome.ABANDONED),
+        )
+    )
     await db.commit()
     return result.rowcount or 0  # type: ignore[attr-defined]
 
@@ -111,7 +121,6 @@ async def list_calls(
         stmt = stmt.where(CallSession.call_outcome == outcome)
     if escalated is not None:
         stmt = stmt.where(CallSession.escalated_to_human == escalated)
-    # Datetime bounds (not dates) so the dashboard decides the day boundary's timezone.
     if started_after:
         stmt = stmt.where(CallSession.call_start >= started_after)
     if started_before:

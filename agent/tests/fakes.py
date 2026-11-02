@@ -1,5 +1,3 @@
-"""Deterministic stand-ins for LLM providers."""
-
 import asyncio
 from collections.abc import Callable, Sequence
 from typing import Any
@@ -10,12 +8,6 @@ Reply = AIMessage | Exception | Callable[[Sequence[BaseMessage]], AIMessage]
 
 
 class ScriptedProvider:
-    """Returns pre-scripted replies in order and records what it was sent.
-
-    A reply can be an AIMessage, an exception to raise, or a callable that
-    builds the AIMessage from the messages it receives.
-    """
-
     def __init__(self, name: str, replies: Sequence[Reply] = (), *, delay: float = 0.0):
         self.name = name
         self.replies = list(replies)
@@ -43,5 +35,4 @@ def say(text: str) -> AIMessage:
 
 
 def call(name: str, call_id: str = "call_1", **args: Any) -> AIMessage:
-    """An AIMessage requesting a single tool call."""
     return AIMessage(content="", tool_calls=[{"name": name, "args": args, "id": call_id}])

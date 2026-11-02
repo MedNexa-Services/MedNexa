@@ -16,7 +16,6 @@ class Hospital(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     email: Mapped[str | None] = mapped_column(String(254))
     opening_time: Mapped[time]
     closing_time: Mapped[time]
-    # IANA zone; all "today" / "already passed" checks use hospital-local time.
     timezone: Mapped[str] = mapped_column(String(64), server_default="Asia/Kolkata")
     languages: Mapped[list[str]] = mapped_column(JSONB, server_default=text('\'["en", "hi"]\''))
     general_instructions: Mapped[str | None] = mapped_column(Text)

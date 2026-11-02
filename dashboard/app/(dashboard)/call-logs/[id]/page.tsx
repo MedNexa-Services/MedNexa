@@ -94,7 +94,6 @@ export default function CallPage() {
     load();
   }, [load]);
 
-  // A call still in progress keeps adding turns.
   React.useEffect(() => {
     if (!call || call.call_end) return;
     const timer = setInterval(load, 5_000);

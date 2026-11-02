@@ -50,7 +50,7 @@ export default function CallsPage() {
       setTotal(res.total);
     } catch (err) {
       if (phoneQuery) {
-        setCalls([]); // an incomplete number is rejected by the API: no match yet
+        setCalls([]);
         setTotal(0);
       } else {
         toast.error(err instanceof Error ? err.message : "Calls could not be loaded.");
@@ -62,7 +62,7 @@ export default function CallsPage() {
 
   React.useEffect(() => {
     load();
-    const timer = setInterval(load, 30_000); // new calls arrive while the page is open
+    const timer = setInterval(load, 30_000);
     return () => clearInterval(timer);
   }, [load]);
 

@@ -1,7 +1,6 @@
 import * as React from "react";
 import Link from "next/link";
 
-/** Label/value rows for detail pages. Rows with an empty value (or false) are left out. */
 export function DetailList({ items }: { items: { label: string; value: React.ReactNode }[] }) {
   return (
     <dl className="divide-y divide-border">
@@ -17,7 +16,6 @@ export function DetailList({ items }: { items: { label: string; value: React.Rea
   );
 }
 
-/** Link back to the list a detail page belongs to. */
 export function BackLink({ href, children }: { href: string; children: React.ReactNode }) {
   return (
     <Link href={href} className="text-muted-foreground hover:text-foreground">

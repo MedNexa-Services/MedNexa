@@ -1,20 +1,3 @@
-"""Voice Activity Detection using Silero VAD.
-
-Silero VAD is a lightweight PyTorch model (~1 MB) that detects speech/silence
-in 16 kHz mono audio frames. We use it to:
-  1. Detect when the caller starts speaking (speech_start).
-  2. Detect when they finish (speech_end — silence after speech).
-  3. Implement barge-in: interrupt TTS when speech is detected.
-
-Usage::
-
-    vad = SileroVAD()                    # loads model on first call
-    for chunk in audio_stream:
-        result = vad.process_chunk(chunk)
-        if result == "speech_start":   ...
-        if result == "speech_end":     ...
-"""
-
 from __future__ import annotations
 
 from typing import Literal
@@ -26,23 +9,14 @@ from telephony.logging_setup import get_logger
 
 log = get_logger("vad")
 
-# Silero VAD model expects exactly 512 samples at 16 kHz (32 ms frames).
-# We accumulate raw bytes and process complete frames.
-FRAME_SAMPLES = 512  # 32 ms @ 16 kHz
-FRAME_BYTES = FRAME_SAMPLES * 2  # int16 = 2 bytes per sample
+FRAME_SAMPLES = 512
+FRAME_BYTES = FRAME_SAMPLES * 2
 
 VadEvent = Literal["silence", "speech_start", "speech", "speech_end"]
 
 
 class SileroVAD:
-    """Wrapper around the Silero VAD torch model.
-
-    Thread-safe for a single call; create one instance per active call.
-    The model is cached as a class-level attribute so it is loaded only once
-    across all concurrent calls (saves ~300 ms startup per call).
-    """
-
-    _model: object | None = None  # silero model (shared)
+    _model: object | None = None
     _utils: object | None = None
 
     @classmethod
@@ -56,6 +30,7 @@ class SileroVAD:
                 model="silero_vad",
                 force_reload=False,
                 onnx=False,
+                trust_repo=True,
             )
             model.eval()
             cls._model = model
@@ -72,18 +47,16 @@ class SileroVAD:
 
         self._model_obj, self._utils_obj = self._load_model()
 
-        # State machine
         self._in_speech: bool = False
         self._speech_start_ms: float = 0.0
         self._silence_start_ms: float = 0.0
-        self._elapsed_ms: float = 0.0  # tracks position in stream
-        self._leftover: bytes = b""  # incomplete frame buffer
+        self._elapsed_ms: float = 0.0
+        self._leftover: bytes = b""
 
     def _ms_per_frame(self) -> float:
-        return (FRAME_SAMPLES / self._sample_rate) * 1000  # 32 ms
+        return (FRAME_SAMPLES / self._sample_rate) * 1000
 
     def _is_speech_frame(self, samples: np.ndarray) -> bool:  # type: ignore[type-arg]
-        """Run VAD on one 32 ms frame. Returns True if speech detected."""
         import torch  # type: ignore[import-untyped]
 
         tensor = torch.from_numpy(samples.astype(np.float32) / 32768.0)
@@ -92,14 +65,6 @@ class SileroVAD:
         return confidence >= self._threshold
 
     def process_chunk(self, raw_bytes: bytes) -> list[VadEvent]:
-        """Process a raw PCM chunk (16-bit little-endian, 16 kHz mono).
-
-        Returns a list of events that occurred in this chunk:
-          - ``"speech_start"`` — silence → speech transition
-          - ``"speech"``       — continuation of active speech
-          - ``"speech_end"``   — speech → silence transition (utterance ready)
-          - ``"silence"``      — pure silence (no transition)
-        """
         events: list[VadEvent] = []
         buf = self._leftover + raw_bytes
 
@@ -112,7 +77,6 @@ class SileroVAD:
 
             if is_speech:
                 if not self._in_speech:
-                    # Was silent — check if this is a speech start
                     self._speech_start_ms = self._elapsed_ms
                     self._in_speech = True
                     events.append("speech_start")
@@ -133,7 +97,6 @@ class SileroVAD:
                         self._silence_start_ms = 0.0
                         events.append("speech_end")
                     else:
-                        # Still counting as "in speech" — brief pause
                         events.append("speech")
                 else:
                     events.append("silence")
@@ -144,7 +107,6 @@ class SileroVAD:
         return events
 
     def reset(self) -> None:
-        """Reset state machine for a new utterance."""
         self._in_speech = False
         self._speech_start_ms = 0.0
         self._silence_start_ms = 0.0

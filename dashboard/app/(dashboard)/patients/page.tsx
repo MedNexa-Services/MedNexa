@@ -35,7 +35,6 @@ export default function PatientsPage() {
 
   const load = React.useCallback(async () => {
     if (!hospitalId) return;
-    // Digits (with spaces, dashes or a +) search by phone; anything else by name.
     const byPhone = /^[+\d][\d\s-]*$/.test(query);
     try {
       const res = await searchPatients({
@@ -48,7 +47,6 @@ export default function PatientsPage() {
       setPatients(res.items);
       setTotal(res.total);
     } catch (err) {
-      // A partial phone number is rejected by the API; that just means no match yet.
       if (byPhone) {
         setPatients([]);
         setTotal(0);

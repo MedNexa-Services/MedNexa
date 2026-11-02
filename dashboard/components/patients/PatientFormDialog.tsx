@@ -28,7 +28,7 @@ import { User, Phone, Mail, MapPin, Loader2, Save } from "lucide-react";
 interface PatientFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  patient?: PatientOut | null; // If provided, edit mode
+  patient?: PatientOut | null;
   onSuccess: () => void;
 }
 
@@ -148,7 +148,7 @@ export function PatientFormDialog({
                 placeholder="e.g. Ramesh Kumar"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                disabled={!!patient} // name + phone identify the patient and can't be edited
+                disabled={!!patient}
                 required
               />
             </div>
@@ -163,7 +163,7 @@ export function PatientFormDialog({
                 placeholder="+919876543210"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
-                disabled={!!patient} // Phone is primary identity anchor in backend
+                disabled={!!patient}
                 required
               />
               {patient && (

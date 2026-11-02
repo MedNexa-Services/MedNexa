@@ -1,5 +1,3 @@
-"""create_agent: Part 2's MedNexaAgent when installed, otherwise the stub."""
-
 from __future__ import annotations
 
 import sys
@@ -30,7 +28,7 @@ def test_uses_mednexa_agent_when_installed(fake_agent_package: None) -> None:
 
 
 def test_falls_back_to_stub_when_not_installed(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(sys.modules, "agent", None)  # makes `import agent` fail
+    monkeypatch.setitem(sys.modules, "agent", None)
     assert isinstance(create_agent("+919876543210", "hosp-1"), StubAgent)
 
 

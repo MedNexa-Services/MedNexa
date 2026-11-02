@@ -10,8 +10,6 @@ class SlotOut(BaseModel):
 
 
 class DoctorSlotOut(BaseModel):
-    """A free slot with enough doctor context for the agent to offer it to a caller."""
-
     doctor_id: uuid.UUID
     doctor_name: str
     speciality: str

@@ -1,5 +1,3 @@
-"""Tests for the STT module (Faster-Whisper wrapper)."""
-
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
@@ -25,15 +23,11 @@ class TestLanguageNormalisation:
         assert FasterWhisperSTT._normalise_language("zh") == DEFAULT_LANGUAGE
 
     def test_hindi_prefix(self) -> None:
-        # Whisper sometimes returns "hindi" (full name)
         assert FasterWhisperSTT._normalise_language("hindi") == "hi"
 
 
 class TestTranscribeBytes:
-    """Test transcribe_bytes with a mocked Whisper model."""
-
     def _make_pcm(self, duration_s: float = 1.0) -> bytes:
-        """Generate silent PCM audio."""
         n = int(16000 * duration_s)
         return (np.zeros(n, dtype=np.int16)).tobytes()
 
@@ -45,7 +39,6 @@ class TestTranscribeBytes:
         assert result.confidence == 0.0
 
     def test_transcribe_mocked(self) -> None:
-        """Verify transcribe_bytes passes through model output correctly."""
         stt = FasterWhisperSTT.__new__(FasterWhisperSTT)
         stt._model_size = "base"
         stt._device = "cpu"
@@ -54,10 +47,10 @@ class TestTranscribeBytes:
         stt._vad_filter = False
         stt._model = None
 
-        # Build mock segment and info
         mock_segment = MagicMock()
         mock_segment.text = "  Hello, how can I help?  "
         mock_segment.avg_logprob = -0.1
+        mock_segment.no_speech_prob = 0.01
 
         mock_info = MagicMock()
         mock_info.language = "en"
@@ -83,7 +76,6 @@ class TestTranscribeBytes:
         assert result.confidence > 0
 
     def test_hindi_hint_preserved(self) -> None:
-        """Language hint should be passed through when provided."""
         stt = FasterWhisperSTT.__new__(FasterWhisperSTT)
         stt._model_size = "base"
         stt._device = "cpu"
@@ -94,7 +86,9 @@ class TestTranscribeBytes:
 
         captured: dict[str, object] = {}
 
-        def fake_transcribe(samples: object, *, language_hint: str | None) -> TranscriptionResult:
+        def fake_transcribe(
+            samples: object, *, language_hint: str | None, prompt: str | None
+        ) -> TranscriptionResult:
             captured["hint"] = language_hint
             return TranscriptionResult(
                 text="नमस्ते", language="hi", confidence=0.85, duration_seconds=1.0
@@ -118,7 +112,6 @@ class TestDeviceResolution:
 
     @staticmethod
     def _fake_torch(monkeypatch: pytest.MonkeyPatch, cuda: bool) -> None:
-        """A stand-in torch module, so these tests don't need the real (huge) package."""
         import sys
         import types
 
@@ -142,8 +135,6 @@ class TestDeviceResolution:
 
 
 class FakeWhisper:
-    """Stands in for faster_whisper.WhisperModel; records each transcribe call."""
-
     def __init__(self, detected: str, probs: list[tuple[str, float]] | None = None) -> None:
         self.detected = detected
         self.probs = probs or []
@@ -151,7 +142,7 @@ class FakeWhisper:
 
     def transcribe(self, samples: object, **kwargs: object) -> tuple[list[MagicMock], MagicMock]:
         self.calls.append(kwargs)
-        segment = MagicMock(text=" text ", avg_logprob=-0.2)
+        segment = MagicMock(text=" text ", avg_logprob=-0.2, no_speech_prob=0.01)
         info = MagicMock(duration=1.0, all_language_probs=self.probs)
         info.language = kwargs.get("language") or self.detected
         return [segment], info
@@ -204,3 +195,43 @@ def test_whisper_model_is_loaded_once_and_shared(monkeypatch: pytest.MonkeyPatch
     second._load()
     assert len(built) == 1
     assert first._model is second._model
+
+
+class TestSilenceAndNames:
+    @staticmethod
+    def _stt(segments: list[MagicMock]) -> FasterWhisperSTT:
+        stt = FasterWhisperSTT.__new__(FasterWhisperSTT)
+        stt._beam_size, stt._vad_filter, stt._model_size = 5, True, "base"
+        stt._model = MagicMock()
+        stt._model.transcribe.return_value = (segments, MagicMock(language="en", duration=1.0))
+        return stt
+
+    @staticmethod
+    def _segment(text: str, logprob: float, no_speech: float) -> MagicMock:
+        return MagicMock(text=text, avg_logprob=logprob, no_speech_prob=no_speech)
+
+    def test_a_silent_segment_is_dropped(self) -> None:
+        stt = self._stt([self._segment("Thanks for watching!", -1.4, 0.9)])
+        assert stt.transcribe_bytes(b"\x01\x00" * 16000).text == ""
+
+    def test_low_confidence_speech_is_kept(self) -> None:
+        stt = self._stt([self._segment("just tomorrow.", -0.8, 0.05)])
+        assert stt.transcribe_bytes(b"\x01\x00" * 16000).text == "just tomorrow."
+
+    def test_the_prompt_is_passed_to_whisper(self) -> None:
+        stt = self._stt([self._segment("Dr. Suresh Patel", -0.2, 0.01)])
+        stt.transcribe_bytes(b"\x01\x00" * 16000, prompt="Doctors: Dr. Suresh Patel.")
+        kwargs = stt._model.transcribe.call_args.kwargs
+        assert kwargs["initial_prompt"] == "Doctors: Dr. Suresh Patel."
+        assert kwargs["condition_on_previous_text"] is False
+
+    def test_no_prompt_is_not_sent(self) -> None:
+        stt = self._stt([self._segment("hello", -0.2, 0.01)])
+        stt.transcribe_bytes(b"\x01\x00" * 16000)
+        assert "initial_prompt" not in stt._model.transcribe.call_args.kwargs
+
+    def test_warm_up_runs_the_model_once(self) -> None:
+        stt = self._stt([])
+        stt._model_size, stt._device, stt._compute_type = "base", "cpu", "int8"
+        stt.warm_up()
+        stt._model.transcribe.assert_called_once()

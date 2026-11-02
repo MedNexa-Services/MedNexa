@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Test call · MedNexa</title>
+<style>
+  :root {
+    --background: #f6f7f5; --foreground: #1d2320; --card: #ffffff; --muted: #edf0ee;
+    --muted-foreground: #5f6a65; --border: #dce1de; --sidebar: #eef1ef;
+    --primary: #1e6b5c; --primary-foreground: #ffffff; --destructive: #b42318;
+    --status-moved: #9a6700; --status-done: #5f6a65;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --background: #121614; --foreground: #e6eae8; --card: #181d1b; --muted: #222927;
+      --muted-foreground: #98a39e; --border: #2a312e; --sidebar: #161b19;
+      --primary: #5fb39f; --primary-foreground: #0e1f1a; --destructive: #f07a6e;
+      --status-moved: #d9a441; --status-done: #98a39e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--background); color: var(--foreground);
+    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  }
+  .shell { display: flex; min-height: 100vh; }
+  aside {
+    width: 240px; flex-shrink: 0; display: flex; flex-direction: column; justify-content: space-between;
+    background: var(--sidebar); border-right: 1px solid var(--border); padding: 20px;
+  }
+  .brand { margin: 0; font-size: 13px; font-weight: 500; color: var(--primary); }
+  .place { margin: 2px 0 0; font-size: 15px; font-weight: 600; }
+  .line { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; font-weight: 500; }
+  .line-detail { margin: 2px 0 0 14px; font-size: 12px; color: var(--muted-foreground); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--status-done); }
+  main { flex: 1; padding: 32px; max-width: 760px; }
+  h1 { margin: 0; font-size: 22px; line-height: 1.25; font-weight: 600; letter-spacing: -0.01em; }
+  .description { margin: 4px 0 24px; color: var(--muted-foreground); }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; }
+  .card-head { padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 15px; font-weight: 600; }
+  .card-body { padding: 20px 16px; }
+  .state { display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 600; }
+  .state .dot { width: 10px; height: 10px; }
+  .hint { margin: 4px 0 18px 20px; color: var(--muted-foreground); }
+  [data-state="listening"] .dot, [data-state="hearing"] .dot { background: var(--primary); }
+  [data-state="hearing"] .dot { box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 25%, transparent); }
+  [data-state="speaking"] .dot, [data-state="thinking"] .dot { background: var(--status-moved); }
+  .meter { height: 6px; border-radius: 3px; background: var(--muted); overflow: hidden; }
+  .meter span { display: block; height: 100%; width: 0; background: var(--primary); transition: width 60ms linear; }
+  .meter-label { margin: 6px 0 20px; font-size: 12px; color: var(--muted-foreground); }
+  button {
+    font: inherit; font-weight: 500; height: 36px; padding: 0 16px; border-radius: 6px; border: 0; cursor: pointer;
+  }
+  button:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+  .start { background: var(--primary); color: var(--primary-foreground); }
+  .end { background: var(--destructive); color: #fff; }
+  .note { margin: 16px 0 0; font-size: 13px; color: var(--muted-foreground); }
+  .error { margin: 12px 0 0; font-size: 13px; color: var(--destructive); }
+  .info { margin: 12px 0 0; font-size: 13px; color: var(--muted-foreground); }
+  .lines { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; }
+  .lines li { padding: 10px 16px; border-bottom: 1px solid var(--border); }
+  .lines li:last-child { border-bottom: 0; }
+  .who { display: block; font-size: 12px; font-weight: 500; color: var(--muted-foreground); }
+  .lines .assistant .who { color: var(--primary); }
+  .conversation { margin-top: 16px; }
+  [hidden] { display: none !important; }
+  @media (max-width: 720px) {
+    .shell { flex-direction: column; }
+    aside { width: auto; flex-direction: row; align-items: center; border-right: 0; border-bottom: 1px solid var(--border); padding: 12px 16px; }
+    .line-detail { display: none; }
+    main { padding: 20px 16px; }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside>
+    <div>
+      <p class="brand">MedNexa</p>
+      <p class="place">Test line</p>
+    </div>
+    <div>
+      <p class="line"><span class="dot" id="lineDot"></span><span id="lineText">Ready</span></p>
+      <p class="line-detail" id="lineDetail">No call in progress</p>
+    </div>
+  </aside>
+
+  <main>
+    <h1>Test call</h1>
+    <p class="description">Talk to the AI receptionist from this browser, the way a patient would on the phone.</p>
+
+    <section class="card">
+      <div class="card-head">Call</div>
+      <div class="card-body">
+        <div id="idle">
+          <button class="start" id="startButton">Start call</button>
+        </div>
+        <div id="live" data-state="speaking" hidden>
+          <div class="state" aria-live="polite"><span class="dot"></span><span id="stateTitle">Connecting</span></div>
+          <p class="hint" id="stateHint"></p>
+          <div class="meter"><span id="level"></span></div>
+          <p class="meter-label">Microphone</p>
+          <button class="end" id="endButton">End call</button>
+        </div>
+        <p class="error" id="error" hidden></p>
+        <p class="info" id="info" hidden></p>
+      </div>
+    </section>
+
+    <section class="card conversation" id="conversation" hidden>
+      <div class="card-head">Conversation</div>
+      <ol class="lines" id="lines"></ol>
+    </section>
+
+    <p class="note">Use headphones if you can, so the receptionist doesn't hear its own voice. Finished calls appear under Calls in the dashboard.</p>
+  </main>
+</div>
+
+<script>
+  const STATES = {
+    connecting: ["Connecting", ""],
+    speaking: ["Receptionist is speaking", "Your microphone is off until it finishes."],
+    listening: ["Your turn", "Speak now. Pause when you are done."],
+    hearing: ["Listening", "Keep going. Pause when you are done."],
+    thinking: ["Working on a reply", "This can take a few seconds."],
+  };
+  const SPEECH_LEVEL = 0.02;
+  const ECHO_TAIL = 0.7;
+
+  const $ = (id) => document.getElementById(id);
+  let ws, audioContext, micStream, processor;
+  let inCall = false, nextPlayTime = 0, serverThinking = false, shown = "";
+  let browserSpeaking = false, closingMessage = null;
+
+  function show(state) {
+    if (state === shown) return;
+    shown = state;
+    $("live").dataset.state = state;
+    [$("stateTitle").textContent, $("stateHint").textContent] = STATES[state];
+  }
+
+  function setLine(active) {
+    $("lineDot").style.background = active ? "var(--primary)" : "";
+    $("lineText").textContent = active ? "On a call" : "Ready";
+    $("lineDetail").textContent = active ? "Talking to the receptionist" : "No call in progress";
+  }
+
+  function addLine(role, text) {
+    const item = document.createElement("li");
+    item.className = role;
+    const who = document.createElement("span");
+    who.className = "who";
+    who.textContent = role === "user" ? "You" : "Receptionist";
+    item.append(who, text);
+    $("lines").append(item);
+    $("conversation").hidden = false;
+    $("lines").scrollTop = $("lines").scrollHeight;
+  }
+
+
+  function speakInBrowser(text) {
+    if (!("speechSynthesis" in window)) return;
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "en-IN";
+    browserSpeaking = true;
+    utterance.onend = utterance.onerror = () => { browserSpeaking = false; };
+    speechSynthesis.speak(utterance);
+  }
+
+  function onServerEvent(event) {
+    if (event.state) serverThinking = event.state === "thinking";
+    else if (event.transcript) addLine(event.transcript.role, event.transcript.text);
+    else if (event.speak) speakInBrowser(event.speak);
+    else if (event.error) closingMessage = { text: event.error, error: true };
+    else if (event.ended) closingMessage = { text: "The receptionist ended the call." };
+  }
+
+  async function startCall() {
+    $("error").hidden = $("info").hidden = true;
+    $("lines").replaceChildren();
+    $("conversation").hidden = true;
+    closingMessage = null;
+    $("idle").hidden = true;
+    $("live").hidden = false;
+    show("connecting");
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+      audioContext = new AudioContext({ sampleRate: 16000 });
+      nextPlayTime = audioContext.currentTime;
+      const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+      ws = new WebSocket(`${scheme}//${location.host}/ws/call?phone=%2B919876543210&lang=en`);
+      ws.binaryType = "arraybuffer";
+      ws.onopen = () => { inCall = true; setLine(true); show("speaking"); startMicrophone(); };
+      ws.onmessage = (e) => {
+        if (e.data instanceof ArrayBuffer) play(e.data);
+        else onServerEvent(JSON.parse(e.data));
+      };
+      ws.onclose = () => {
+        if (!audioContext && !inCall) return;
+        endCall(closingMessage || { text: "The connection was lost.", error: true }, true);
+      };
+    } catch (err) {
+      endCall({ text: "The microphone could not be used: " + err.message, error: true }, false);
+    }
+  }
+
+  function startMicrophone() {
+    const source = audioContext.createMediaStreamSource(micStream);
+    processor = audioContext.createScriptProcessor(512, 1, 1);
+    processor.onaudioprocess = (e) => {
+      if (!inCall || ws.readyState !== WebSocket.OPEN) return;
+      const input = e.inputBuffer.getChannelData(0);
+      const now = audioContext.currentTime;
+      const playing = nextPlayTime > now || browserSpeaking;
+
+
+      const muted = serverThinking || playing || now < nextPlayTime + ECHO_TAIL;
+
+      let sum = 0;
+      for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
+      const level = muted ? 0 : Math.sqrt(sum / input.length);
+      $("level").style.width = Math.min(100, level * 600) + "%";
+
+      if (serverThinking && !playing) show("thinking");
+      else if (muted) show("speaking");
+      else show(level > SPEECH_LEVEL ? "hearing" : "listening");
+
+      const pcm = new Int16Array(input.length);
+      if (!muted) {
+        for (let i = 0; i < input.length; i++) {
+          const s = Math.max(-1, Math.min(1, input[i]));
+          pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+        }
+      }
+      ws.send(pcm.buffer);
+    };
+    source.connect(processor);
+    processor.connect(audioContext.destination);
+  }
+
+  function play(buffer) {
+    if (!audioContext) return;
+    const samples = new Int16Array(buffer);
+    const audio = audioContext.createBuffer(1, samples.length, 16000);
+    const channel = audio.getChannelData(0);
+    for (let i = 0; i < samples.length; i++) channel[i] = samples[i] / 32768;
+    const source = audioContext.createBufferSource();
+    source.buffer = audio;
+    source.connect(audioContext.destination);
+    nextPlayTime = Math.max(nextPlayTime, audioContext.currentTime);
+    source.start(nextPlayTime);
+    nextPlayTime += audio.duration;
+  }
+
+
+
+  function endCall(message, letAudioFinish) {
+    inCall = false;
+    serverThinking = false;
+    if (processor) { processor.disconnect(); processor = null; }
+    if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; }
+    if (ws) { const socket = ws; ws = null; socket.close(); }
+    const context = audioContext;
+    audioContext = null;
+    const wait = letAudioFinish && context ? Math.max(0, nextPlayTime - context.currentTime) : 0;
+    setTimeout(() => context && context.close(), wait * 1000 + 300);
+    shown = "";
+    setLine(false);
+    $("live").hidden = true;
+    $("idle").hidden = false;
+    if (message) {
+      const target = $(message.error ? "error" : "info");
+      target.textContent = message.text;
+      target.hidden = false;
+    }
+  }
+
+  $("startButton").addEventListener("click", startCall);
+  $("endButton").addEventListener("click", () => endCall({ text: "Call ended." }, false));
+</script>
+</body>
+</html>

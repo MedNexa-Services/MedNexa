@@ -11,7 +11,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-/** Ask before a change that affects bookings. `confirmLabel` names the action ("Deactivate"). */
 export function ConfirmDialog({
   open,
   onOpenChange,

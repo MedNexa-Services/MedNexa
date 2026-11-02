@@ -1,10 +1,11 @@
-# MedNexa — Voice-Enabled Agentic AI Hospital Receptionist 🏥
+# MedNexa
 
-MedNexa is an autonomous, bilingual (English & Hindi) voice-enabled AI hospital receptionist system. It handles inbound patient calls, provides hospital information, books and cancels doctor appointments with conflict-free scheduling, and provides hospital staff with a modern Next.js admin dashboard.
+An AI receptionist that answers a hospital's phone line. It talks to callers in English or
+Hindi, answers questions about the hospital, suggests which doctor to see, and books,
+cancels and reschedules OPD appointments. Staff manage doctors, appointments and calls in a
+web dashboard.
 
----
-
-## 🏗️ System Architecture
+## Architecture
 
 ```
                                   ┌──────────────────────────┐
@@ -33,9 +34,7 @@ MedNexa is an autonomous, bilingual (English & Hindi) voice-enabled AI hospital 
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
----
-
-## 📦 Services and Port Mapping
+## Services and ports
 
 | Service | Technology | Port (Host) | Description |
 |---|---|---|---|
@@ -45,10 +44,7 @@ MedNexa is an autonomous, bilingual (English & Hindi) voice-enabled AI hospital 
 | **Database** | PostgreSQL 16 | `127.0.0.1:5434` | Appointments, doctors, schedules, call logs (local access only) |
 | **Local LLM** | Ollama | internal | Local inference (`llama3.1:8b`); no published port because Ollama has no authentication |
 
-
----
-
-## 🚀 Quick Start (Docker Deployment - Part 5)
+## Running it with Docker
 
 ### 1. Prerequisites
 - [Docker](https://docs.docker.com/get-docker/) & [Docker Compose](https://docs.docker.com/compose/) v2+
@@ -92,9 +88,40 @@ docker compose --profile demo run --rm seed
 Useful addresses: dashboard `http://localhost:3001`, API docs `http://localhost:8000/docs`,
 API health `http://localhost:8000/api/v1/health`, telephony health `http://localhost:8001/health`.
 
----
+### 5. Trying a call
 
-## 🔐 Security & Authentication (Task 5.3)
+**From a browser, without a phone line:** open `http://localhost:8001/call`, start the call
+and allow the microphone. Use headphones so the receptionist doesn't hear itself. To call
+from a phone's browser instead, expose port 8001 over HTTPS (for example `ngrok http 8001`)
+and open `<that URL>/call`; browsers only allow the microphone over HTTPS.
+
+The test line has no sign-in, so on a server reachable from the internet set
+`MEDNEXA_TEL_WEB_CALL_ENABLED=false`.
+
+**From a real phone, through Twilio:**
+1. On a Twilio trial account, add your own number under *Verified Caller IDs* (choose
+   "Call me": SMS verification often fails for Indian numbers).
+2. Set `MEDNEXA_TEL_TWILIO_ACCOUNT_SID`, `MEDNEXA_TEL_TWILIO_AUTH_TOKEN`,
+   `MEDNEXA_TEL_TWILIO_PHONE_NUMBER` and `MEDNEXA_TEL_PUBLIC_URL` (the public HTTPS address of
+   port 8001) in `.env`, then `docker compose up -d telephony`.
+3. In the Twilio console, set the number's *A call comes in* webhook to
+   `<MEDNEXA_TEL_PUBLIC_URL>/twilio/voice` (HTTP POST), and call the number.
+
+Finished calls, with their transcripts, appear under **Calls** in the dashboard.
+
+### 6. Choosing the AI model
+
+With `MEDNEXA_AGENT_LLM_MODE=auto` the receptionist uses the local model first and a cloud
+model when the local one is slow or down.
+
+- **Cloud (Groq):** set `MEDNEXA_AGENT_GROQ_API_KEY`. The defaults use `openai/gpt-oss-20b`
+  with low reasoning effort; list a second model in `MEDNEXA_AGENT_CLOUD_FALLBACK_MODELS` so it
+  answers when the first hits Groq's per-minute limit.
+- **Local (Ollama):** `docker compose exec ollama ollama pull llama3.1:8b`. On an NVIDIA GPU,
+  start the stack with `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d`;
+  otherwise the model runs on the CPU and replies slowly.
+
+## Security
 
 - **One place checks credentials: the backend.** `POST /api/v1/auth/login` verifies the staff
   account from `MEDNEXA_ADMIN_EMAIL` / `MEDNEXA_ADMIN_PASSWORD` (plain or a PBKDF2 hash from
@@ -113,10 +140,7 @@ API health `http://localhost:8000/api/v1/health`, telephony health `http://local
 - **Patient data in logs and storage:** phone numbers in telephony logs and in the API's access
   log keep only their last 4 digits. Call transcripts are deleted after
   `MEDNEXA_CALL_LOG_RETENTION_DAYS` (90 by default; 0 keeps them).
-
----
-
-## 💾 Database Backup & Disaster Recovery (Task 5.12)
+## Backups
 
 Automated backup and restore scripts are located in `scripts/`:
 
@@ -148,12 +172,9 @@ anything fails, nothing changes.
   ```powershell
   .\scripts\restore.ps1 -BackupFile .\backups\mednexa_backup_<timestamp>.sql.gz   # add -Yes to skip the prompt
   ```
+## Development without Docker
 
----
-
-## 🛠️ Local Development (Without Docker)
-
-### Backend (Part 1)
+### Backend
 ```bash
 cd backend
 uv sync
@@ -164,39 +185,31 @@ uv run python -m scripts.seed
 uv run uvicorn app.main:app --port 8000 --reload
 ```
 
-### AI Agent (Part 2)
+### AI agent
 ```bash
 cd agent
 uv sync
 uv run mednexa-chat
 ```
 
-### Voice / Telephony (Part 3)
+### Telephony
 ```bash
 cd telephony
 uv sync
 uv run uvicorn telephony.main:app --port 8001 --reload
 ```
 
-### Admin Dashboard (Part 4)
+### Dashboard
 ```bash
 cd dashboard
 npm install
 BACKEND_URL=http://localhost:8000 npm run dev
 ```
+## Continuous integration
 
----
-
-## 🧪 CI/CD Automation
-
-Continuous Integration workflows run via GitHub Actions on every pull request and push:
+GitHub Actions runs these on every pull request and push:
 - **`backend.yml`**: Ruff linting, formatting, mypy static analysis, Alembic migration verification, and Postgres pytest suite.
 - **`agent.yml`**: Agent harness, LangGraph evaluation, tool-calling tests.
 - **`dashboard.yml`**: ESLint, TypeScript compilation (`tsc --noEmit`), Next.js production build.
 - **`telephony.yml`**: ruff and the voice pipeline tests (Whisper, Silero and TTS are mocked).
 - **`docker.yml`**: validates `docker-compose.yml`, lints the backup scripts, builds the API and dashboard images and starts the stack to check it comes up healthy.
-
----
-
-## 📄 License
-MedNexa is proprietary medical receptionist software designed for high-concurrency hospital operations.

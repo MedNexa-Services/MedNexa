@@ -1,8 +1,3 @@
-"""Telephony pipeline configuration.
-
-All variables are prefixed MEDNEXA_TEL_ in the environment / .env file.
-"""
-
 from __future__ import annotations
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -15,21 +10,19 @@ class TelephonySettings(BaseSettings):
         extra="ignore",
     )
 
-    # ── Backend API ──────────────────────────────────────────────────────────
     backend_url: str = "http://localhost:8000"
-    """Base URL of the Part 1 FastAPI backend (no trailing slash)."""
+    """Backend URL, without a trailing slash."""
 
     backend_api_key: str = ""
     """Service key for the backend's /calls routes (the backend's MEDNEXA_SERVICE_API_KEY).
     Without it the backend rejects call-log requests with 401 once auth is enabled."""
 
     hospital_id: str = ""
-    """UUID of the hospital this pipeline serves. Set in .env."""
+    """The hospital whose calls this service answers."""
 
     use_stub_agent: bool = False
-    """Use the canned StubAgent even when Part 2's agent package is installed."""
+    """Answer with the canned StubAgent instead of the real agent."""
 
-    # ── Twilio ───────────────────────────────────────────────────────────────
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
     twilio_phone_number: str = ""
@@ -37,28 +30,26 @@ class TelephonySettings(BaseSettings):
     """Staff number (E.164) that calls are connected to when the agent hands over to a
     person. Empty = the caller is asked to call reception instead."""
 
-    # ── STT (Faster-Whisper) ─────────────────────────────────────────────────
     whisper_model_size: str = "large-v3"
     """Whisper model: tiny / base / small / medium / large-v3."""
     whisper_device: str = "auto"
     """'cuda', 'cpu', or 'auto' (auto-detects GPU)."""
     whisper_compute_type: str = "int8"
     """Quantisation: float16 (GPU) or int8 (CPU/GPU)."""
-    whisper_beam_size: int = 1
-    """Beam size 1 = fastest, lowest accuracy; increase for accuracy."""
+    whisper_beam_size: int = 5
+    """Beam size 1 = fastest, lowest accuracy; 5 is a little slower and more accurate."""
     whisper_vad_filter: bool = True
     """Let Whisper apply its own internal VAD on top of Silero."""
 
-    # ── VAD (Silero) ─────────────────────────────────────────────────────────
     vad_threshold: float = 0.5
     """Confidence threshold for speech vs silence (0.0–1.0)."""
     vad_min_speech_ms: int = 250
     """Minimum speech segment length in ms (shorter are discarded)."""
-    vad_min_silence_ms: int = 600
-    """Silence after speech that triggers end-of-utterance."""
+    vad_min_silence_ms: int = 1000
+    """Silence after speech that triggers end-of-utterance (shorter cuts callers off
+    when they pause mid-sentence, e.g. while giving their age)."""
     vad_sample_rate: int = 16000
 
-    # ── TTS ──────────────────────────────────────────────────────────────────
     tts_engine: str = "piper"
     """Primary TTS: 'piper' (local) or 'edge' (cloud fallback)."""
     piper_binary: str = "piper"
@@ -66,31 +57,38 @@ class TelephonySettings(BaseSettings):
     piper_voice_en: str = "en_US-amy-medium"
     """Piper voice model for English (filename without .onnx)."""
     piper_voice_hi: str = "hi_IN-hemant-medium"
-    """Piper voice model for Hindi."""
     piper_models_dir: str = "models/piper"
     """Directory where .onnx voice model files are stored."""
+    edge_rate: str = "+5%"
+    """Speaking speed of the Edge voices relative to normal, e.g. "+10%" or "-5%"."""
+    tts_retries: int = 2
+    """Extra tries when the voice service can't be reached."""
+    tts_timeout_seconds: float = 10.0
+    """Give up on one try of one sentence after this long."""
+    tts_cache_size: int = 128
+    """Sentences kept for reuse."""
     edge_voice_en: str = "en-IN-NeerjaNeural"
-    """Edge-TTS voice for English."""
     edge_voice_hi: str = "hi-IN-SwaraNeural"
-    """Edge-TTS voice for Hindi."""
 
-    # ── Call pipeline ────────────────────────────────────────────────────────
-    call_timeout_seconds: int = 300
-    """Maximum call duration (5 min default). Call ends automatically after this."""
+    call_timeout_seconds: int = 600
+    """Longest a call can last (10 min default); it ends automatically after this."""
     silence_timeout_seconds: int = 30
-    """Hang up if the caller is silent for this many seconds."""
+    """Ask "are you still there?" after half of this many seconds of silence, and hang up
+    after the other half. Counted from the end of the last reply."""
+    thinking_filler_seconds: float = 4.0
+    """Say "one moment, please" if the agent takes longer than this to answer."""
     barge_in_enabled: bool = True
-    """Stop TTS playback when caller starts speaking."""
     max_concurrent_calls: int = 10
+    web_call_enabled: bool = True
+    """The /call test page and /ws/call. They have no sign-in: anyone who can reach this
+    port could start calls and use the AI model, so turn them off on a public server."""
 
-    # ── Logging ──────────────────────────────────────────────────────────────
     log_level: str = "INFO"
     recordings_dir: str = "recordings"
     """Directory to store call recordings (created if absent)."""
     enable_recordings: bool = False
     """Record calls (requires caller consent prompt)."""
 
-    # ── HTTP server (Twilio webhook receiver) ────────────────────────────────
     server_host: str = "0.0.0.0"
     server_port: int = 8001
     public_url: str = ""

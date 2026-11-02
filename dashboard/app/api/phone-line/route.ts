@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 
 export type PhoneLineState = "answering" | "needs_setup" | "offline" | "not_configured";
 
-/** Whether the AI receptionist can take calls, from the telephony service's own health check. */
 export async function GET() {
   const base = process.env.TELEPHONY_URL?.replace(/\/+$/, "");
   if (!base) return NextResponse.json({ state: "not_configured" satisfies PhoneLineState });

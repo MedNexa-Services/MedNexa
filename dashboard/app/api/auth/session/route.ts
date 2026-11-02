@@ -1,7 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { TOKEN_COOKIE, apiUrl, cookieOptions } from "@/lib/auth/token";
 
-/** The signed-in staff user, as verified by the backend (it checks the token's signature). */
 export async function GET(request: NextRequest) {
   const token = request.cookies.get(TOKEN_COOKIE)?.value;
   if (!token) return NextResponse.json({ user: null }, { status: 401 });

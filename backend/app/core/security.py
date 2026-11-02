@@ -1,15 +1,3 @@
-"""Security & JWT authentication utilities (Part 5 - Task 5.3).
-
-HS256 JSON Web Tokens and PBKDF2 password hashing, built on the standard library
-only. There are deliberately no fallback secrets here: signing and verifying
-fail loudly when MEDNEXA_JWT_SECRET is missing or too short, so a misconfigured
-server cannot hand out (or accept) tokens that anyone could forge.
-
-Hash a password for MEDNEXA_ADMIN_PASSWORD with:
-
-    uv run python -m app.core.security
-"""
-
 from __future__ import annotations
 
 import base64
@@ -25,7 +13,7 @@ from typing import Any, cast
 from app.config import get_settings
 
 MIN_SECRET_LENGTH = 32
-PBKDF2_ITERATIONS = 600_000  # OWASP 2023 guidance for PBKDF2-HMAC-SHA256
+PBKDF2_ITERATIONS = 600_000
 _JWT_HEADER = {"alg": "HS256", "typ": "JWT"}
 
 
@@ -55,7 +43,6 @@ def _sign(signing_input: bytes) -> bytes:
 
 
 def create_access_token(data: dict[str, Any], expires_delta: timedelta | None = None) -> str:
-    """Create a signed HS256 JWT."""
     settings = get_settings()
     now = datetime.now(UTC)
     expires = now + (expires_delta or timedelta(minutes=settings.jwt_access_token_expire_minutes))
@@ -70,11 +57,6 @@ def create_access_token(data: dict[str, Any], expires_delta: timedelta | None = 
 
 
 def decode_access_token(token: str) -> dict[str, Any]:
-    """Verify a token and return its payload.
-
-    Raises ValueError for anything invalid (format, algorithm, signature, missing
-    or past expiry) and RuntimeError if the server has no usable signing secret.
-    """
     parts = token.strip().split(".")
     if len(parts) != 3:
         raise ValueError("Invalid token format")
@@ -84,7 +66,7 @@ def decode_access_token(token: str) -> dict[str, Any]:
     except UnicodeEncodeError as exc:
         raise ValueError("Invalid token format") from exc
 
-    expected = _sign(signing_input)  # also enforces the secret requirements
+    expected = _sign(signing_input)
     if not hmac.compare_digest(expected, _b64url_decode(signature_b64)):
         raise ValueError("Invalid token signature")
 
@@ -107,27 +89,19 @@ def decode_access_token(token: str) -> dict[str, Any]:
 
 
 def hash_password(password: str, iterations: int = PBKDF2_ITERATIONS) -> str:
-    """PBKDF2-HMAC-SHA256 hash as `pbkdf2:$<iterations>$<salt hex>$<key hex>`."""
     salt = secrets.token_bytes(16)
     key = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
     return f"pbkdf2:${iterations}${salt.hex()}${key.hex()}"
 
 
 def verify_password(plain_password: str, stored: str) -> bool:
-    """Check a password against the configured value.
-
-    `stored` is either a PBKDF2 hash (see hash_password; the legacy
-    `pbkdf2:$<salt>$<key>` form with 100,000 iterations is still accepted) or a
-    plain password. A stored hash is never accepted as the password itself, and
-    an empty stored value never matches.
-    """
     if not stored:
         return False
     if not stored.startswith("pbkdf2:"):
         return hmac.compare_digest(plain_password.encode("utf-8"), stored.encode("utf-8"))
     try:
         fields = stored.split("$")[1:]
-        if len(fields) == 2:  # legacy: pbkdf2:$salt$key
+        if len(fields) == 2:
             iterations, (salt_hex, key_hex) = 100_000, fields
         else:
             iterations, salt_hex, key_hex = int(fields[0]), fields[1], fields[2]

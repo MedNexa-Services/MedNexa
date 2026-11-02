@@ -8,12 +8,6 @@ from app.models.enums import Gender
 
 
 class Patient(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """A patient is identified by (hospital, phone, normalized name).
-
-    One phone number can belong to several patients (family members), which is
-    what allows parallel bookings from the same phone.
-    """
-
     __tablename__ = "patient"
     __table_args__ = (
         UniqueConstraint("hospital_id", "phone", "normalized_name"),

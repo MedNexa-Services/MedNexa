@@ -1,15 +1,3 @@
-"""Call recording helper (task 3.13).
-
-Records each call to a WAV file (16 kHz, mono, int16) when enabled in config.
-A consent prompt is played at the start of any recorded call.
-
-Recording file naming: ``{recordings_dir}/{session_id}_{YYYYMMDD_HHMMSS}.wav``
-
-The recorder writes a valid WAV header before the first audio chunk and keeps
-appending raw PCM data as chunks arrive. On ``close()``, the header is patched
-with the final data size.
-"""
-
 from __future__ import annotations
 
 import wave
@@ -21,8 +9,6 @@ from telephony.logging_setup import get_logger
 
 log = get_logger("recorder")
 
-# Callers can't opt out mid-call yet (keypad/DTMF input is not implemented,
-# plan task 3.11), so the prompt must not offer an opt-out: it only informs.
 CONSENT_PROMPT_EN = (
     "Please note that this call is recorded for quality and training purposes. "
     "If you do not want to be recorded, you can end the call now."
@@ -34,14 +20,6 @@ CONSENT_PROMPT_HI = (
 
 
 class CallRecorder:
-    """Write call audio to a WAV file.
-
-    Usage::
-
-        async with CallRecorder(session_id) as rec:
-            rec.write(pcm_bytes)
-    """
-
     def __init__(self, session_id: str) -> None:
         cfg = get_settings()
         self._enabled = cfg.enable_recordings
@@ -59,7 +37,7 @@ class CallRecorder:
         if self._enabled and self._path:
             self._wav = wave.open(str(self._path), "wb")
             self._wav.setnchannels(1)
-            self._wav.setsampwidth(2)  # int16
+            self._wav.setsampwidth(2)
             self._wav.setframerate(16000)
             log.info("recording_started", path=str(self._path))
         return self
@@ -68,7 +46,6 @@ class CallRecorder:
         self.close()
 
     def write(self, pcm: bytes) -> None:
-        """Append a raw PCM chunk to the recording."""
         if self._wav is not None and pcm:
             self._wav.writeframes(pcm)
 
@@ -87,5 +64,4 @@ class CallRecorder:
         return self._enabled
 
     def consent_prompt(self, language: str = "en") -> str:
-        """Return the consent prompt text in the caller's language."""
         return CONSENT_PROMPT_HI if language == "hi" else CONSENT_PROMPT_EN

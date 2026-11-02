@@ -31,8 +31,6 @@ def _doctor_query(
     department: str | None,
     include_inactive: bool,
 ) -> Select[Doctor]:
-    """Speciality/department match case-insensitively by substring; LIKE wildcards
-    in the input are matched literally and blank filters are ignored."""
     stmt = select(Doctor)
     if hospital_id:
         stmt = stmt.where(Doctor.hospital_id == hospital_id)
@@ -55,7 +53,6 @@ async def search_doctors(
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[Doctor], int]:
-    """Dashboard listing (paged)."""
     stmt = _doctor_query(hospital_id, speciality, department, include_inactive)
     return await paginate(db, stmt, limit, offset)
 
@@ -66,13 +63,11 @@ async def list_doctors(
     speciality: str | None = None,
     department: str | None = None,
 ) -> list[DoctorOut]:
-    """Agent lookup: all active doctors of a hospital, optionally filtered."""
     stmt = _doctor_query(hospital_id, speciality, department, include_inactive=False)
     return [DoctorOut.model_validate(d) for d in await db.scalars(stmt)]
 
 
 async def get_doctor(db: AsyncSession, doctor_id: uuid.UUID) -> DoctorDetailOut:
-    """Doctor with schedule overrides for the next UPCOMING_OVERRIDE_DAYS days."""
     doctor = await load_doctor(db, doctor_id)
     today = hospital_now(doctor.hospital.timezone).date()
     overrides = await db.scalars(
@@ -92,8 +87,6 @@ async def get_doctor(db: AsyncSession, doctor_id: uuid.UUID) -> DoctorDetailOut:
 
 
 async def update_doctor(db: AsyncSession, doctor_id: uuid.UUID, data: DoctorUpdate) -> Doctor:
-    """Template changes apply to future slot calculations only; existing
-    appointments keep their time and slot duration."""
     doctor = await load_doctor(db, doctor_id)
     apply_updates(doctor, data.model_dump(exclude_unset=True))
     if doctor.slot_end_time <= doctor.slot_start_time:
@@ -104,8 +97,6 @@ async def update_doctor(db: AsyncSession, doctor_id: uuid.UUID, data: DoctorUpda
 
 
 async def deactivate_doctor(db: AsyncSession, doctor_id: uuid.UUID) -> None:
-    """Soft delete: the doctor stops getting new bookings. Existing appointments
-    are left untouched for staff to handle."""
     doctor = await load_doctor(db, doctor_id)
     doctor.is_active = False
     await db.commit()

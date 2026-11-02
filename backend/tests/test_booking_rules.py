@@ -51,9 +51,6 @@ async def doctor(db, hospital):
     return await make_doctor(db, hospital)
 
 
-# --- booking ------------------------------------------------------------------------
-
-
 async def test_booking_returns_confirmation_with_token(db, doctor) -> None:
     conf = await book_appointment(db, booking(doctor.id, time(9)), now=NOW)
     assert conf.token_number == 1
@@ -90,7 +87,7 @@ async def test_same_phone_same_name_reuses_patient(db, doctor) -> None:
     )
     patients = list(await db.scalars(select(Patient)))
     assert len(patients) == 1
-    assert patients[0].age == 34  # later booking filled in a missing detail
+    assert patients[0].age == 34
 
 
 async def test_same_patient_same_slot_is_duplicate(db, doctor) -> None:
@@ -174,9 +171,6 @@ async def test_failed_booking_leaves_no_patient_behind(db, doctor) -> None:
     assert await db.scalar(select(func.count()).select_from(Patient)) == 0
 
 
-# --- cancellation -------------------------------------------------------------------
-
-
 async def test_cancel_requires_matching_phone(db, doctor) -> None:
     conf = await book_appointment(db, booking(doctor.id, time(9)), now=NOW)
     with pytest.raises(NotOwner):
@@ -210,9 +204,6 @@ async def test_caller_cannot_cancel_past_appointment_but_staff_can(db, doctor) -
 async def test_cancel_unknown_appointment(db) -> None:
     with pytest.raises(NotFound):
         await cancel_appointment(db, uuid.uuid4(), PHONE)
-
-
-# --- rescheduling -------------------------------------------------------------------
 
 
 async def test_reschedule_moves_booking_and_links_rows(db, doctor) -> None:
@@ -268,9 +259,6 @@ async def test_staff_reschedule(db, doctor) -> None:
     assert row.booking_source == BookingSource.DASHBOARD
 
 
-# --- caller lookup ------------------------------------------------------------------
-
-
 async def test_get_patient_appointments_requires_name_and_phone(db, doctor) -> None:
     await book_appointment(db, booking(doctor.id, time(9)), now=NOW)
     await book_appointment(db, booking(doctor.id, time(9, 30), name="Sita Kumar"), now=NOW)
@@ -281,6 +269,25 @@ async def test_get_patient_appointments_requires_name_and_phone(db, doctor) -> N
     assert [a.appointment_time for a in mine] == [time(9)]
     assert await get_patient_appointments(db, doctor.hospital_id, PHONE, "Nobody", now=NOW) == []
     assert await get_patient_appointments(db, doctor.hospital_id, "bad", "Rahul", now=NOW) == []
+
+
+async def test_a_misheard_name_still_finds_the_callers_own_booking(db, doctor) -> None:
+    await book_appointment(db, booking(doctor.id, time(9), name="Asha"), now=NOW)
+    await book_appointment(db, booking(doctor.id, time(9, 30), name="Rohan Mehta"), now=NOW)
+    hid = doctor.hospital_id
+
+    for heard in ("Aasha", "asha ", "Rohan"):
+        found = await get_patient_appointments(db, hid, PHONE, heard, now=NOW)
+        assert len(found) == 1, heard
+    assert await get_patient_appointments(db, hid, PHONE, "Ershah", now=NOW) == []
+    other = "+919123456789"
+    assert await get_patient_appointments(db, hid, other, "Asha", now=NOW) == []
+
+
+async def test_an_ambiguous_misheard_name_matches_nothing(db, doctor) -> None:
+    await book_appointment(db, booking(doctor.id, time(9), name="Asha Rao"), now=NOW)
+    await book_appointment(db, booking(doctor.id, time(9, 30), name="Asha Rai"), now=NOW)
+    assert await get_patient_appointments(db, doctor.hospital_id, PHONE, "Asha", now=NOW) == []
 
 
 async def test_get_patient_appointments_upcoming_only(db, doctor) -> None:
@@ -301,7 +308,7 @@ async def test_upcoming_appointments_exclude_cancelled_rescheduled_and_past(db, 
     await reschedule_appointment(db, moved.appointment_id, PHONE, MONDAY, time(11), now=NOW)
     await book_appointment(db, booking(doctor.id, time(10)), now=NOW)
 
-    during_monday = datetime.combine(MONDAY, time(10, 15), IST)  # 10:00 has passed, 11:00 hasn't
+    during_monday = datetime.combine(MONDAY, time(10, 15), IST)
     upcoming = await get_patient_appointments(
         db, doctor.hospital_id, PHONE, "Rahul Kumar", now=during_monday
     )

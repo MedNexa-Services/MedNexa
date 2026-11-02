@@ -12,8 +12,6 @@ from app.schemas.auth import LoginRequest, StaffUserOut, TokenResponse
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-# 5 wrong passwords per account per 5 minutes; a looser per-address limit stops one
-# machine from sweeping many accounts (and from locking everyone out behind a proxy).
 EMAIL_LIMITER = FailedLoginLimiter(max_failures=5, window_seconds=300)
 ADDRESS_LIMITER = FailedLoginLimiter(max_failures=30, window_seconds=300)
 
@@ -41,7 +39,6 @@ async def login(credentials: LoginRequest, request: Request) -> TokenResponse:
     if blocked:
         raise _too_many(blocked)
 
-    # Always evaluate both checks so timing doesn't reveal which one failed.
     email_ok = hmac.compare_digest(
         email.encode("utf-8"), settings.admin_email.strip().lower().encode("utf-8")
     )

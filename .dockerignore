@@ -11,7 +11,6 @@ dashboard
 scripts
 docker-compose.yml
 README.md
-Plan.md
 
 # local environments and caches
 **/.venv

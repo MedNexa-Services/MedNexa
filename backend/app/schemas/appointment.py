@@ -49,7 +49,6 @@ class AppointmentOut(BaseModel):
 
     @classmethod
     def from_model(cls, appt: Appointment) -> "AppointmentOut":
-        """Requires `patient` and `doctor` to be loaded on the appointment."""
         return cls(
             id=appt.id,
             patient_id=appt.patient_id,
@@ -74,8 +73,6 @@ class AppointmentOut(BaseModel):
 
 
 class BookingConfirmation(BaseModel):
-    """What the agent reads back to the caller after a successful booking."""
-
     appointment_id: uuid.UUID
     token_number: int
     patient_name: str

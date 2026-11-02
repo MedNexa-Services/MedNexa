@@ -1,6 +1,5 @@
 import { Button } from "@/components/ui/button";
 
-/** "21–40 of 132" with previous/next buttons. */
 export function Pagination({
   page,
   pageSize,

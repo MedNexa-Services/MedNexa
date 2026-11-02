@@ -78,6 +78,4 @@ class DoctorOut(ORMModel):
 
 
 class DoctorDetailOut(DoctorOut):
-    """Doctor plus schedule overrides for the coming weeks (leave, changed hours)."""
-
     upcoming_overrides: list[ScheduleOverrideOut]

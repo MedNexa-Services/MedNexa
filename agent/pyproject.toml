@@ -1,7 +1,7 @@
 [project]
 name = "mednexa-agent"
 version = "0.1.0"
-description = "MedNexa Part 2: LangGraph receptionist agent (LLM + tool calling)"
+description = "MedNexa AI receptionist agent (LangGraph, tool calling)"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -26,7 +26,7 @@ build-backend = "hatchling.build"
 packages = ["agent"]
 
 [tool.uv.sources]
-# The agent's tools call Part 1's service layer directly (app.services.contracts).
+# The agent's tools call the backend's service layer directly (app.services.contracts).
 mednexa-backend = { path = "../backend", editable = true }
 
 [dependency-groups]

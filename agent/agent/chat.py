@@ -1,11 +1,3 @@
-"""Text chat with the agent in a terminal: Phase 1's "text-only, no voice" mode.
-
-    uv run mednexa-chat                          # first active hospital, test caller
-    uv run mednexa-chat --phone +919812345678 --hospital-id <uuid>
-
-Type /quit to end the call; the summary and outcome are printed at the end.
-"""
-
 import argparse
 import asyncio
 import logging

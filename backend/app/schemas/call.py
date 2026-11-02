@@ -12,10 +12,6 @@ ANONYMOUS_CALLER = "anonymous"
 
 
 def _caller_id(value: str) -> str:
-    """Normalized caller number, or 'anonymous' when the number is withheld or invalid.
-
-    Calls from hidden numbers must still be answered and logged.
-    """
     try:
         return normalize_phone(value)
     except ValueError:

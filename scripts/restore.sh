@@ -1,5 +1,5 @@
 #!/bin/sh
-# MedNexa database restore (Part 5, task 5.12).
+# MedNexa database restore.
 #
 #   ./scripts/restore.sh ./backups/mednexa_backup_<timestamp>.sql.gz [-y]
 #

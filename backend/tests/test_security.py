@@ -1,5 +1,3 @@
-"""Token and password handling (app/core/security.py)."""
-
 import base64
 import hashlib
 import hmac
@@ -16,7 +14,6 @@ from app.core.security import (
     verify_password,
 )
 
-# The secret the PR originally shipped as a default in config.py and compose.
 PUBLISHED_DEFAULT_SECRET = "mednexa-super-secret-jwt-signing-key-32bytes-minimum"
 
 
@@ -29,9 +26,6 @@ def forge(payload: dict, secret: str, header: dict | None = None) -> str:
     body_b64 = b64(json.dumps(payload).encode())
     signature = hmac.new(secret.encode(), f"{header_b64}.{body_b64}".encode(), hashlib.sha256)
     return f"{header_b64}.{body_b64}.{b64(signature.digest())}"
-
-
-# --- tokens ---------------------------------------------------------------------
 
 
 def test_token_signed_with_the_published_default_secret_is_rejected() -> None:
@@ -82,13 +76,10 @@ def test_expired_token_is_rejected() -> None:
         decode_access_token(token)
 
 
-# --- passwords ------------------------------------------------------------------
-
-
 def test_the_stored_hash_cannot_be_used_as_the_password() -> None:
     stored = hash_password("correct horse battery staple")
     assert verify_password("correct horse battery staple", stored)
-    assert not verify_password(stored, stored)  # logging in with the leaked hash itself
+    assert not verify_password(stored, stored)
 
 
 def test_hashes_are_salted_and_record_their_cost() -> None:

@@ -1,5 +1,5 @@
 #!/bin/sh
-# MedNexa database backup (Part 5, task 5.12).
+# MedNexa database backup.
 #
 #   ./scripts/backup.sh                 # backup into ./backups
 #   BACKUP_DIR=/mnt/usb ./scripts/backup.sh

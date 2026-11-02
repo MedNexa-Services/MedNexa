@@ -1,5 +1,3 @@
-"""Small helpers that insert rows directly, bypassing the service layer."""
-
 from datetime import date, time, timedelta
 from typing import Any
 
@@ -18,7 +16,6 @@ from app.models import (
 
 
 def next_weekday(iso_weekday: int, weeks_ahead: int = 1) -> date:
-    """A date in the future falling on the given ISO weekday (1 = Monday)."""
     today = date.today()
     days = (iso_weekday - today.isoweekday()) % 7 + 7 * weeks_ahead
     return today + timedelta(days=days)
@@ -88,7 +85,7 @@ async def make_appointment(
     token: int | None = None,
 ) -> Appointment:
     if token is None:
-        token = int(at.hour * 100 + at.minute)  # unique enough per doctor-day in tests
+        token = int(at.hour * 100 + at.minute)
     appt = Appointment(
         patient_id=patient.id,
         doctor_id=doctor.id,

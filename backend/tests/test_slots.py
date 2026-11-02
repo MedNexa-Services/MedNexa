@@ -38,10 +38,7 @@ def _at(d: date, t: time) -> datetime:
     return datetime.combine(d, t, IST)
 
 
-EARLY = _at(MONDAY - timedelta(days=3), time(8))  # a "now" well before MONDAY
-
-
-# --- pure planning ------------------------------------------------------------------
+EARLY = _at(MONDAY - timedelta(days=3), time(8))
 
 
 def test_template_day_gives_full_grid() -> None:
@@ -72,7 +69,7 @@ def test_partial_override_falls_back_to_template_times() -> None:
 
 
 def test_slot_must_fit_before_end_of_window() -> None:
-    doctor = _doctor(slot_duration_minutes=45)  # 9:00, 9:45 fit; 10:30 would end at 11:15
+    doctor = _doctor(slot_duration_minutes=45)
     assert plan_day(doctor, MONDAY, None, {}, EARLY).free_slots() == [time(9), time(9, 45)]
 
 
@@ -96,9 +93,6 @@ def test_today_hides_slots_that_already_started() -> None:
 def test_past_date_has_no_slots() -> None:
     now = _at(MONDAY + timedelta(days=1), time(8))
     assert plan_day(_doctor(), MONDAY, None, {}, now).free_slots() == []
-
-
-# --- database-backed ----------------------------------------------------------------
 
 
 async def test_cancelled_appointment_frees_the_slot(db) -> None:
@@ -184,8 +178,7 @@ async def test_find_next_available_horizon_is_exactly_14_days(db) -> None:
     hospital = await make_hospital(db)
     doctor = await make_doctor(db, hospital, available_days=[1], max_daily_appointments=1)
     patient = await make_patient(db, hospital)
-    await make_appointment(db, doctor, patient, MONDAY, time(9))  # day 1 full
-    await make_override(db, doctor, MONDAY + timedelta(days=7), is_available=False)  # day 8 off
+    await make_appointment(db, doctor, patient, MONDAY, time(9))
+    await make_override(db, doctor, MONDAY + timedelta(days=7), is_available=False)
 
-    # Day 15 (MONDAY + 14) is the first free Monday but lies outside the 14-day window.
     assert await find_next_available(db, hospital.id, "Cardiology", MONDAY, now=EARLY) == []

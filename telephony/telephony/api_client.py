@@ -1,17 +1,6 @@
-"""Thin async HTTP client for the MedNexa backend API (Part 1).
-
-This is the *only* place where the telephony pipeline talks to the backend.
-It wraps the call-session endpoints and exposes typed helpers so the rest of
-the pipeline never constructs raw HTTP requests.
-
-Endpoints used (from Part 1's /api/v1):
-  POST /calls                  → start_call
-  POST /calls/{id}/logs        → append_log
-  POST /calls/{id}/end         → end_call
-"""
-
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import httpx
@@ -21,13 +10,10 @@ from telephony.logging_setup import get_logger
 
 log = get_logger("api_client")
 
+POST_RETRIES = 3
+
 
 class BackendClient:
-    """Async HTTP client for the MedNexa backend.
-
-    Use as an async context manager or call ``aclose()`` when done.
-    """
-
     def __init__(self, base_url: str | None = None, timeout: float = 10.0) -> None:
         settings = get_settings()
         self._base = (base_url or settings.backend_url).rstrip("/")
@@ -45,19 +31,25 @@ class BackendClient:
     async def __aexit__(self, *_: Any) -> None:
         await self.aclose()
 
-    # ── helpers ──────────────────────────────────────────────────────────────
-
     async def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
         url = f"/api/v1{path}"
-        resp = await self._client.post(url, json=body)
-        resp.raise_for_status()
-        result: dict[str, Any] = resp.json()
-        return result
-
-    # ── call session ─────────────────────────────────────────────────────────
+        for attempt in range(1 + POST_RETRIES):
+            try:
+                resp = await self._client.post(url, json=body)
+                if resp.status_code >= 500 and attempt < POST_RETRIES:
+                    raise httpx.HTTPStatusError("server error", request=resp.request, response=resp)
+            except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+                if attempt == POST_RETRIES:
+                    raise
+                log.warning("backend_retry", path=path, attempt=attempt + 1, error=repr(exc)[:100])
+                await asyncio.sleep(0.5 * 2**attempt)
+                continue
+            resp.raise_for_status()
+            result: dict[str, Any] = resp.json()
+            return result
+        raise RuntimeError("unreachable")  # pragma: no cover
 
     async def start_call(self, hospital_id: str, caller_phone: str) -> str:
-        """Create a call session. Returns the session UUID string."""
         data = await self._post(
             "/calls",
             {"hospital_id": hospital_id, "caller_phone": caller_phone},
@@ -76,10 +68,6 @@ class BackendClient:
         tool_result: str | None = None,
         appointment_id: str | None = None,
     ) -> None:
-        """Append one conversation turn to the call log.
-
-        ``role`` is a backend CallRole: USER, ASSISTANT, TOOL or SYSTEM.
-        """
         body: dict[str, Any] = {"role": role.upper(), "content": content}
         if tool_called:
             body["tool_called"] = tool_called
@@ -90,7 +78,6 @@ class BackendClient:
         try:
             await self._post(f"/calls/{session_id}/logs", body)
         except Exception as exc:
-            # Logging failures are non-fatal — the call must continue.
             log.warning("append_log_failed", session_id=session_id, error=str(exc))
 
     async def end_call(
@@ -102,11 +89,6 @@ class BackendClient:
         language_detected: str | None = None,
         escalated_to_human: bool = False,
     ) -> None:
-        """Mark the call session as ended with outcome metadata.
-
-        ``outcome`` is a backend CallOutcome (BOOKED, CANCELLED, RESCHEDULED,
-        INFO_PROVIDED, ESCALATED, ABANDONED, OTHER).
-        """
         body: dict[str, Any] = {
             "call_outcome": outcome,
             "escalated_to_human": escalated_to_human,
@@ -122,7 +104,6 @@ class BackendClient:
             log.warning("end_call_failed", session_id=session_id, error=str(exc))
 
     async def health_check(self) -> bool:
-        """Return True if the backend is reachable and healthy."""
         try:
             resp = await self._client.get("/api/v1/health")
             return resp.status_code == 200

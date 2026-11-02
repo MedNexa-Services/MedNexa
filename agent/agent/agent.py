@@ -1,15 +1,3 @@
-"""MedNexaAgent: one instance per phone call.
-
-Implements Part 3's AgentInterface (telephony/telephony/agent_interface.py):
-
-    agent = MedNexaAgent(caller_phone, hospital_id)
-    await agent.get_greeting()
-    await agent.process(text, language)   # language from STT: "en" / "hi"
-    await agent.get_summary()
-
-Plus `call_outcome` and `escalated` for ending the call session in the backend.
-"""
-
 import asyncio
 import logging
 import uuid
@@ -32,6 +20,10 @@ from agent.tools import ToolContext
 
 logger = logging.getLogger(__name__)
 
+RETRY = {
+    "en": "I'm sorry, I lost my connection for a moment. Could you please say that again?",
+    "hi": "माफ़ कीजिए, कनेक्शन में थोड़ी दिक्कत हुई। कृपया दोबारा कहिए।",
+}
 TROUBLE = {
     "en": (
         "I'm sorry, I'm having trouble right now. Let me connect you to our staff; "
@@ -66,46 +58,56 @@ class MedNexaAgent:
             caller_phone=phone,
             session_factory=self._session_factory,
             now=now,
+            confirm_changes=self.settings.confirm_changes,
         )
+        self._failed_turns = 0
         self.language = "en"
+        self.fixed_language: str | None = None
         self._hospital: HospitalContext | None = None
-        self._pending: list[AnyMessage] = []  # greeting, added to history on first turn
+        self._pending: list[AnyMessage] = []
         self._lock = asyncio.Lock()
         self._config: RunnableConfig = {"configurable": {"thread_id": str(uuid.uuid4())}}
         self._graph = build_graph(self.router, self.ctx, self.settings, self._system_prompt)
 
-    # --- AgentInterface -------------------------------------------------------------
-
     async def get_greeting(self) -> str:
         try:
             hospital: HospitalContext | None = await self._hospital_context()
-        except Exception:  # never fail the call before it starts
+        except Exception:
             logger.exception("hospital_context_failed hospital_id=%s", self.ctx.hospital_id)
             hospital = None
-        text = greeting(hospital)
+        text = greeting(hospital, self.fixed_language)
         self._pending.append(AIMessage(content=text))
         return text
 
     async def process(self, text: str, language: str = "en") -> str:
-        """Handle one caller utterance and return the reply to speak."""
         async with self._lock:
-            self.language = detect_language(
+            self.language = self.fixed_language or detect_language(
                 text, hint=normalize_language(language) or self.language
             )
             if not text.strip():
                 return await self._reply_for_empty()
+            pending = self._pending
             state: AgentState = {
-                "messages": [*self._pending, HumanMessage(content=text)],
+                "messages": [*pending, HumanMessage(content=text)],
                 "language": self.language,
                 "tool_rounds": 0,
             }
             self._pending = []
+            self.ctx.turn += 1
+            self.ctx.last_caller_text = text
+            self.ctx.readback = None
+            self.ctx.done = None
             try:
                 result = await self._graph.ainvoke(state, self._config)
             except Exception:
                 logger.exception("agent_turn_failed")
-                self.ctx.escalation_reason = "Agent error"
-                return TROUBLE.get(self.language, TROUBLE["en"])
+                self._pending = pending
+                self._failed_turns += 1
+                if self._failed_turns >= self.settings.handover_after_failures:
+                    self.ctx.escalation_reason = "Agent error"
+                    return TROUBLE.get(self.language, TROUBLE["en"])
+                return RETRY.get(self.language, RETRY["en"])
+            self._failed_turns = 0
             reply = result["messages"][-1]
             return reply.text if isinstance(reply, AIMessage) else str(reply.content)
 
@@ -115,7 +117,17 @@ class MedNexaAgent:
             summary = f"{summary or ''} Escalated: {self.ctx.escalation_reason}.".strip()
         return summary
 
-    # --- extras for the call pipeline -----------------------------------------------
+    @property
+    def speech_hints(self) -> str | None:
+        h = self._hospital
+        if h is None:
+            return None
+        doctors = ", ".join(f"Dr. {d.name.removeprefix('Dr. ')}" for d in h.doctors)
+        return (
+            f"Call to {h.name}. Doctors: {doctors}. "
+            f"Departments: {', '.join(h.departments)}. Appointment booking: "
+            "patient name, age, gender male or female."
+        )
 
     @property
     def escalated(self) -> bool:
@@ -123,10 +135,7 @@ class MedNexaAgent:
 
     @property
     def call_outcome(self) -> str:
-        """Backend CallOutcome value (BOOKED, CANCELLED, ..., ESCALATED, OTHER)."""
         return "ESCALATED" if self.escalated else self.ctx.events.outcome()
-
-    # --- internals ------------------------------------------------------------------
 
     async def _hospital_context(self) -> HospitalContext:
         if self._hospital is None:
@@ -139,7 +148,9 @@ class MedNexaAgent:
     async def _system_prompt(self, language: str) -> str:
         hospital = await self._hospital_context()
         now = self._now() if self._now else hospital_now(hospital.timezone)
-        return render_system_prompt(hospital, language, now)
+        return render_system_prompt(
+            hospital, language, now, fixed_language=self.fixed_language is not None
+        )
 
     async def _reply_for_empty(self) -> str:
         return (

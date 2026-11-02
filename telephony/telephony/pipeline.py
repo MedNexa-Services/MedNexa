@@ -1,35 +1,12 @@
-"""CallPipeline — orchestrates a single phone call end-to-end.
-
-Flow per utterance:
-  audio_stream → VAD → accumulate utterance → STT → Agent → TTS → play back
-
-Key responsibilities:
-  3.2  Audio stream handler
-  3.3  VAD integration (Silero VAD)
-  3.4  Faster-Whisper STT
-  3.5  Language detection from STT output
-  3.6  Piper/Edge TTS
-  3.8  Audio streaming back to caller
-  3.9  Barge-in detection (stop TTS when caller speaks)
-  3.10 Call session management (start, end, timeout)
-  3.12 Audio quality optimisation (via AudioProcessor)
-  3.13 Call recording
-
-Usage (Twilio MediaStreams WebSocket)::
-
-    pipeline = CallPipeline(session_id, caller_phone, send_audio_fn)
-    await pipeline.run(audio_byte_iterator)
-
-``send_audio_fn`` is an async callable that sends a raw PCM chunk to the
-caller's audio stream (Twilio / Asterisk bridge provides this).
-"""
-
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import re
 import time
+from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Any
 
 from telephony.agent_interface import AgentInterface, create_agent
 from telephony.api_client import BackendClient
@@ -46,45 +23,69 @@ log = get_logger("pipeline")
 SendAudioFn = Callable[[bytes], Awaitable[None]]
 ClearAudioFn = Callable[[], Awaitable[None]]
 TransferFn = Callable[[], Awaitable[bool]]
+EventFn = Callable[[dict[str, Any]], Awaitable[None]]
 
-# Pipeline audio: 16 kHz mono int16 -> 32000 bytes per second of playback.
 PCM_BYTES_PER_SECOND = 16000 * 2
 
-# Closing phrases (Part 2's agent says these only in its final reply).
+PREROLL_BYTES = PCM_BYTES_PER_SECOND * 3 // 10
+
+MIN_UTTERANCE_BYTES = PCM_BYTES_PER_SECOND * 3 // 10
+
+MAX_UTTERANCE_BYTES = PCM_BYTES_PER_SECOND * 30
+
+MAX_DRAIN_SECONDS = 20.0
+
 _FAREWELL = re.compile(r"\bgood\s?-?bye\b|\bbye\b|अलविदा|धन्यवाद[\s,।!]*नमस्ते", re.IGNORECASE)
 
-# Said when the agent hands over to staff but the call can't be transferred.
-_NO_TRANSFER = {
-    "en": "I'm sorry, I can't connect you to our staff on this line. "
-    "Please call the hospital reception directly. Goodbye!",
-    "hi": "माफ़ कीजिए, इस लाइन पर स्टाफ़ से जोड़ना संभव नहीं है। कृपया अस्पताल के रिसेप्शन पर सीधे कॉल करें। नमस्ते!",
+_NOISE_TRANSCRIPT = re.compile(
+    r"^[\W_]*(you|uh+|um+|hmm+|mm+|ah+|thanks for watching!?|subtitles by .*)?[\W_]*$",
+    re.IGNORECASE,
+)
+
+PHRASES: dict[str, dict[str, str]] = {
+    "filler": {"en": "One moment, please.", "hi": "एक पल रुकिए।"},
+    "repeat": {
+        "en": "Sorry, I didn't catch that. Could you say it again?",
+        "hi": "माफ़ कीजिए, मुझे समझ नहीं आया। कृपया दोबारा कहिए।",
+    },
+    "agent_failed": {
+        "en": "Sorry, something went wrong on my side. Could you say that again?",
+        "hi": "माफ़ कीजिए, मेरी तरफ़ से कुछ गड़बड़ हो गई। कृपया दोबारा कहिए।",
+    },
+    "still_there": {"en": "Are you still there?", "hi": "क्या आप अभी भी वहाँ हैं?"},
+    "silent_goodbye": {
+        "en": "I can't hear you, so I'll end the call now. Goodbye!",
+        "hi": "मुझे आपकी आवाज़ नहीं आ रही, इसलिए मैं कॉल समाप्त कर रही हूँ। नमस्ते!",
+    },
+    "timeout": {
+        "en": "I'm sorry, the call has exceeded the maximum duration. Goodbye!",
+        "hi": "मुझे खेद है, कॉल की अधिकतम अवधि समाप्त हो गई है। नमस्ते!",
+    },
+    "no_transfer": {
+        "en": "I'm sorry, I can't connect you to our staff on this line. "
+        "Please call the hospital reception directly. Goodbye!",
+        "hi": "माफ़ कीजिए, इस लाइन पर स्टाफ़ से जोड़ना संभव नहीं है। "
+        "कृपया अस्पताल के रिसेप्शन पर सीधे कॉल करें। नमस्ते!",
+    },
 }
 
-# Maximum buffer for one utterance (prevents runaway memory if VAD misses end)
-MAX_UTTERANCE_BYTES = 16000 * 2 * 30  # 30 seconds of 16 kHz int16
+
+def fixed_phrases() -> dict[str, list[str]]:
+    phrases = {lang: [p[lang] for p in PHRASES.values()] for lang in ("en", "hi")}
+    try:
+        from agent.agent import RETRY, TROUBLE  # type: ignore[import-not-found]
+    except ImportError:
+        return phrases
+    for lang in phrases:
+        phrases[lang] += [RETRY[lang], TROUBLE[lang]]
+    return phrases
+
+
+def _phrase(key: str, language: str) -> str:
+    return PHRASES[key].get(language, PHRASES[key]["en"])
 
 
 class CallPipeline:
-    """Manages the full lifetime of a single inbound call.
-
-    Parameters
-    ----------
-    session_id:
-        UUID of the ``CallSession`` row already created via Part 1's API.
-    caller_phone:
-        E.164 phone number of the caller (e.g. "+919876543210").
-    send_audio:
-        Async function that sends a raw PCM chunk to the caller.
-    clear_audio:
-        Optional async function that discards audio already queued on the
-        caller's side (Twilio's "clear"), used when the caller barges in.
-    transfer:
-        Optional async function that connects the call to hospital staff when
-        the agent escalates; returns False if it could not.
-    agent:
-        MedNexaAgent or StubAgent instance.
-    """
-
     def __init__(
         self,
         session_id: str,
@@ -94,6 +95,8 @@ class CallPipeline:
         clear_audio: ClearAudioFn | None = None,
         transfer: TransferFn | None = None,
         agent: AgentInterface | None = None,
+        language: str | None = None,
+        on_event: EventFn | None = None,
     ) -> None:
         cfg = get_settings()
         self.session_id = session_id
@@ -101,9 +104,9 @@ class CallPipeline:
         self._send_audio = send_audio
         self._clear_audio = clear_audio
         self._transfer = transfer
+        self._on_event = on_event
         self._cfg = cfg
 
-        # Core components
         self._vad = SileroVAD()
         self._stt = FasterWhisperSTT()
         self._tts = TTSEngine()
@@ -112,123 +115,150 @@ class CallPipeline:
         self._api = BackendClient()
         self._recorder = CallRecorder(session_id)
 
-        # State
-        self._language: str = "en"
+        self._language: str = language or "en"
+        self._language_chosen = language is not None
+        if self._language_chosen and hasattr(self._agent, "fixed_language"):
+            self._agent.fixed_language = self._language
         self._utterance_buf: bytearray = bytearray()
-        # Audio is sent faster than real time and buffered by the telephony side,
-        # so "playing" lasts until the caller has actually heard it all.
+        self._preroll: deque[bytes] = deque()
+        self._preroll_size = 0
         self._playback_until: float = 0.0
         self._barge_in_triggered = asyncio.Event()
         self._call_active = True
+        self._busy = False
+        self._unheard = 0
+        self._silence_prompted = False
         self._start_time: float = 0.0
         self._last_speech_time: float = 0.0
 
-    # ── public entry point ────────────────────────────────────────────────────
-
     async def run(self, audio_stream: AsyncIterator[bytes]) -> None:
-        """Drive the call from audio input to audio output.
-
-        This coroutine returns when the call ends (caller hangs up,
-        timeout, or the agent says goodbye).
-        """
         self._start_time = time.monotonic()
         self._last_speech_time = self._start_time
 
         with self._recorder:
-            # Play consent prompt if recording is enabled
-            if self._recorder.enabled:
-                await self._speak(self._recorder.consent_prompt(self._language))
-                await self._log("ASSISTANT", self._recorder.consent_prompt(self._language))
-
-            # Play opening greeting
-            greeting = await self._agent.get_greeting()
-            await self._speak(greeting)
-            await self._log("ASSISTANT", greeting)
-
             try:
-                async with asyncio.timeout(self._cfg.call_timeout_seconds):
-                    await self._process_stream(audio_stream)
-            except TimeoutError:
-                log.warning("call_timeout", session_id=self.session_id)
-                timeout_msg = (
-                    "I'm sorry, the call has exceeded the maximum duration. Goodbye!"
-                    if self._language == "en"
-                    else "मुझे खेद है, कॉल की अधिकतम अवधि समाप्त हो गई है। नमस्ते!"
-                )
-                await self._speak(timeout_msg)
-            finally:
-                await self._end_call()
+                if self._recorder.enabled:
+                    await self._speak(self._recorder.consent_prompt(self._language))
+                    await self._log("ASSISTANT", self._recorder.consent_prompt(self._language))
 
-    # ── stream processing ─────────────────────────────────────────────────────
+                try:
+                    greeting = await self._agent.get_greeting()
+                except Exception:
+                    log.exception("greeting_failed", session_id=self.session_id)
+                    greeting = "Hello, thank you for calling. How can I help you today?"
+                await self._speak(greeting)
+                await self._log("ASSISTANT", greeting)
+
+                try:
+                    async with asyncio.timeout(self._cfg.call_timeout_seconds):
+                        await self._process_stream(audio_stream)
+                except TimeoutError:
+                    log.warning("call_timeout", session_id=self.session_id)
+                    await self._say("timeout")
+            finally:
+                await self._finish()
 
     async def _process_stream(self, audio_stream: AsyncIterator[bytes]) -> None:
-        """Main loop: read audio chunks, run VAD, accumulate utterances, transcribe."""
         async for raw_chunk in audio_stream:
             if not self._call_active:
                 break
 
-            # Check silence timeout
-            elapsed_silence = time.monotonic() - self._last_speech_time
-            if elapsed_silence > self._cfg.silence_timeout_seconds:
-                log.info("silence_timeout", session_id=self.session_id)
-                silence_msg = (
-                    "Are you still there? Goodbye!"
-                    if self._language == "en"
-                    else "क्या आप अभी भी वहाँ हैं? नमस्ते!"
-                )
-                await self._speak(silence_msg)
+            if await self._caller_went_quiet():
                 break
 
-            # Optionally apply noise suppression to inbound audio
             chunk = self._processor.process(raw_chunk)
-
-            # Write to recording (inbound side)
             self._recorder.write(chunk)
 
-            # Run VAD
             events = self._vad.process_chunk(chunk)
             speaking = "speech_start" in events or "speech" in events
             utterance_ends = "speech_end" in events
 
             if speaking:
                 self._last_speech_time = time.monotonic()
-
-                # Barge-in: interrupt TTS if the caller is still hearing it
+                self._silence_prompted = False
                 if self._cfg.barge_in_enabled and self._is_playing():
                     await self._interrupt_playback()
 
-            # Keep each chunk once while an utterance is open. VAD works in 32 ms
-            # frames, so a short chunk can carry no event at all mid-utterance,
-            # and a long one can carry several.
             if speaking or utterance_ends or self._vad.in_speech:
+                if not self._utterance_buf:
+                    self._utterance_buf.extend(b"".join(self._preroll))
+                    self._preroll.clear()
+                    self._preroll_size = 0
                 self._utterance_buf.extend(chunk)
+            else:
+                self._preroll.append(chunk)
+                self._preroll_size += len(chunk)
+                while self._preroll_size > PREROLL_BYTES:
+                    self._preroll_size -= len(self._preroll.popleft())
 
             if utterance_ends or len(self._utterance_buf) > MAX_UTTERANCE_BYTES:
-                # (the size check is a safety valve against runaway memory)
                 await self._process_utterance()
 
-    # ── utterance handling ────────────────────────────────────────────────────
+    async def _caller_went_quiet(self) -> bool:
+        quiet_for = time.monotonic() - max(self._last_speech_time, self._playback_until)
+        if quiet_for <= self._cfg.silence_timeout_seconds / 2:
+            return False
+        if not self._silence_prompted:
+            log.info("silence_prompt", session_id=self.session_id)
+            self._silence_prompted = True
+            await self._say("still_there")
+            return False
+        log.info("silence_timeout", session_id=self.session_id)
+        await self._say("silent_goodbye")
+        self._call_active = False
+        return True
+
+    @property
+    def listening(self) -> bool:
+        return not self._busy
+
+    async def _emit(self, event: dict[str, Any]) -> None:
+        if self._on_event is not None:
+            with contextlib.suppress(Exception):
+                await self._on_event(event)
 
     async def _process_utterance(self) -> None:
-        """Transcribe the buffered utterance, call the agent, speak the response."""
         if not self._utterance_buf:
             return
+        self._busy = True
+        await self._emit({"state": "thinking"})
+        try:
+            await self._respond()
+        except Exception:
+            log.exception("turn_failed", session_id=self.session_id)
+            await self._say("agent_failed")
+        finally:
+            self._busy = False
+            await self._emit({"state": "listening"})
 
+    async def _respond(self) -> None:
         pcm = bytes(self._utterance_buf)
         self._utterance_buf.clear()
         self._vad.reset()
+        if len(pcm) < MIN_UTTERANCE_BYTES:
+            return
 
-        # STT
         t0 = time.monotonic()
-        # Level the whole utterance (not per chunk) so quiet lines transcribe well.
         pcm = normalise_audio(pcm)
-
-        # Whisper is blocking: run it off the event loop so other calls keep flowing.
-        # No language hint, so each utterance's language is detected afresh.
-        result = await asyncio.to_thread(self._stt.transcribe_bytes, pcm)
+        hint = self._language if self._language_chosen else None
+        prompt = getattr(self._agent, "speech_hints", None)
+        try:
+            result = await asyncio.to_thread(
+                self._stt.transcribe_bytes, pcm, language_hint=hint, prompt=prompt
+            )
+        except Exception:
+            log.exception("stt_failed", session_id=self.session_id)
+            await self._not_understood()
+            return
         stt_ms = int((time.monotonic() - t0) * 1000)
 
-        # Update detected language
+        text = result.text.strip()
+        if not text or _NOISE_TRANSCRIPT.match(text):
+            log.info("utterance_ignored", session_id=self.session_id, text=text[:40])
+            await self._not_understood()
+            return
+        self._unheard = 0
+
         if result.language != self._language:
             log.info(
                 "language_switch",
@@ -238,7 +268,6 @@ class CallPipeline:
             )
             self._language = result.language
 
-        text = result.text.strip()
         log.info(
             "utterance_transcribed",
             session_id=self.session_id,
@@ -246,23 +275,11 @@ class CallPipeline:
             lang=self._language,
             stt_ms=stt_ms,
         )
-
-        if not text:
-            # Empty transcription — ask them to repeat
-            repeat_prompt = (
-                "I'm sorry, I didn't catch that. Could you please repeat?"
-                if self._language == "en"
-                else "माफ करें, मुझे समझ नहीं आया। कृपया दोबारा कहें।"
-            )
-            await self._speak(repeat_prompt)
-            return
-
-        # Log the caller's turn
         await self._log("USER", text)
 
-        # Agent
+        self._last_speech_time = time.monotonic()
         t1 = time.monotonic()
-        response = await self._agent.process(text, self._language)
+        response = await self._ask_agent(text)
         agent_ms = int((time.monotonic() - t1) * 1000)
 
         log.info(
@@ -271,45 +288,60 @@ class CallPipeline:
             response=response[:80],
             agent_ms=agent_ms,
         )
-
-        # Log the agent's turn
         await self._log("ASSISTANT", response)
-
-        # TTS
         await self._speak(response, language=self._language)
+        self._last_speech_time = time.monotonic()
+        self._silence_prompted = False
 
         if getattr(self._agent, "escalated", False):
             await self._hand_over()
-        elif self._is_farewell(response):  # the agent closed the call
+        elif self._is_farewell(response):
             self._call_active = False
 
+    async def _ask_agent(self, text: str) -> str:
+        task = asyncio.create_task(self._agent.process(text, self._language))
+        try:
+            done, _ = await asyncio.wait({task}, timeout=self._cfg.thinking_filler_seconds)
+            if not done:
+                await self._say("filler", log_it=False)
+            return await task
+        except asyncio.CancelledError:
+            task.cancel()
+            raise
+        except Exception:
+            log.exception("agent_failed", session_id=self.session_id)
+            return _phrase("agent_failed", self._language)
+
+    async def _not_understood(self) -> None:
+        self._unheard += 1
+        if self._unheard >= 2:
+            self._unheard = 0
+            await self._say("repeat")
+
     async def _hand_over(self) -> None:
-        """The agent asked for a person: connect the caller to staff, or tell them how
-        to reach staff. Either way the AI's part of the call is over."""
         self._call_active = False
-        # Let the caller hear the agent's "please stay on the line" before moving the call.
         await asyncio.sleep(max(0.0, self._playback_until - time.monotonic()))
         if self._transfer is not None and await self._transfer():
             return
-        message = _NO_TRANSFER.get(self._language, _NO_TRANSFER["en"])
-        await self._speak(message)
-        await self._log("ASSISTANT", message)
-
-    # ── TTS playback ──────────────────────────────────────────────────────────
+        await self._say("no_transfer")
 
     def _is_playing(self) -> bool:
         return time.monotonic() < self._playback_until
 
     async def _interrupt_playback(self) -> None:
-        """Stop the current reply: no more chunks, and drop what is already queued."""
         self._barge_in_triggered.set()
         self._playback_until = 0.0
         log.debug("barge_in", session_id=self.session_id)
         if self._clear_audio is not None:
             await self._clear_audio()
 
+    async def _say(self, key: str, *, log_it: bool = True) -> None:
+        text = _phrase(key, self._language)
+        await self._speak(text)
+        if log_it:
+            await self._log("ASSISTANT", text)
+
     async def _speak(self, text: str, language: str | None = None) -> None:
-        """Synthesise text and stream audio to the caller."""
         lang = language or self._language
         self._barge_in_triggered.clear()
 
@@ -322,27 +354,34 @@ class CallPipeline:
                 await self._send_audio(chunk)
                 start = max(self._playback_until, time.monotonic())
                 self._playback_until = start + len(chunk) / PCM_BYTES_PER_SECOND
+        except Exception:
+            log.exception("tts_failed", session_id=self.session_id)
+            await self._emit({"speak": text})
         finally:
             tts_ms = int((time.monotonic() - t0) * 1000)
             log.debug("tts_done", tts_ms=tts_ms, lang=lang)
 
-    # ── logging ───────────────────────────────────────────────────────────────
-
     async def _log(self, role: str, content: str) -> None:
-        """Append a turn to the call log (non-blocking, errors are swallowed)."""
+        if role in ("USER", "ASSISTANT"):
+            await self._emit({"transcript": {"role": role.lower(), "text": content}})
         await self._api.append_log(self.session_id, role, content)
 
-    # ── call lifecycle ────────────────────────────────────────────────────────
+    async def _finish(self) -> None:
+        try:
+            task = asyncio.current_task()
+            if not (task and task.cancelling()):
+                wait = min(self._playback_until - time.monotonic(), MAX_DRAIN_SECONDS)
+                if wait > 0:
+                    await asyncio.sleep(wait + 0.3)
+        finally:
+            await self._end_call()
 
     async def _end_call(self) -> None:
-        """Finalise session in the backend and clean up resources."""
         try:
             summary = await self._agent.get_summary()
         except Exception:
             log.exception("agent_summary_failed", session_id=self.session_id)
             summary = None
-        # Part 2's agent reports a backend CallOutcome and whether it handed the
-        # caller to staff; other agents (e.g. the stub) fall back to OTHER.
         await self._api.end_call(
             self.session_id,
             outcome=getattr(self._agent, "call_outcome", "OTHER"),
@@ -353,10 +392,6 @@ class CallPipeline:
         await self._api.aclose()
         log.info("pipeline_done", session_id=self.session_id)
 
-    # ── helpers ───────────────────────────────────────────────────────────────
-
     @staticmethod
     def _is_farewell(text: str) -> bool:
-        """Did the agent close the call? Only explicit closing phrases count: words
-        like "धन्यवाद" (thank you) or "take care" also occur mid-conversation."""
         return bool(_FAREWELL.search(text))

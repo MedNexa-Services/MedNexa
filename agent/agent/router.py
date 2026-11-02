@@ -1,17 +1,5 @@
-"""ModelRouter: one interface over the local (Ollama) and cloud (Groq/OpenAI) LLMs.
-
-Routing per call:
-  1. LLM_MODE=local / cloud forces one side.
-  2. Hindi turns go to the cloud when `hindi_prefers_cloud` (better quality).
-  3. Otherwise try local, bounded by `max_latency_seconds`; on timeout or error,
-     answer from the cloud instead.
-  4. Circuit breaker: after `circuit_failure_threshold` consecutive local
-     failures, skip local for `circuit_open_seconds`.
-
-Every call's provider and latency are logged.
-"""
-
 import asyncio
+import json
 import logging
 import time
 from collections.abc import Callable, Sequence
@@ -26,8 +14,6 @@ logger = logging.getLogger(__name__)
 
 
 class ChatProvider(Protocol):
-    """Anything that turns messages (+ tool schemas) into an AIMessage."""
-
     name: str
 
     async def ainvoke(
@@ -36,8 +22,6 @@ class ChatProvider(Protocol):
 
 
 class LangChainProvider:
-    """Adapts a LangChain chat model (ChatOllama, ChatGroq, ChatOpenAI) to ChatProvider."""
-
     def __init__(self, name: str, model: Any) -> None:
         self.name = name
         self._model = model
@@ -52,14 +36,51 @@ class LangChainProvider:
         return result
 
 
+def _rate_limited(exc: BaseException) -> bool:
+    return getattr(exc, "status_code", None) == 429
+
+
+def _transient(exc: BaseException) -> bool:
+    status = getattr(exc, "status_code", None)
+    return (
+        isinstance(exc, ConnectionError | json.JSONDecodeError)
+        or "Connection" in type(exc).__name__
+        or "Timeout" in type(exc).__name__
+        or (isinstance(status, int) and (status == 429 or status >= 500))
+    )
+
+
+class SpilloverProvider:
+    def __init__(self, providers: Sequence[ChatProvider]) -> None:
+        self._providers = list(providers)
+        self.name = self._providers[0].name
+
+    async def ainvoke(
+        self, messages: Sequence[BaseMessage], tools: Sequence[dict[str, Any]]
+    ) -> AIMessage:
+        for provider in self._providers[:-1]:
+            try:
+                result = await provider.ainvoke(messages, tools)
+            except Exception as exc:
+                if not (_rate_limited(exc) or _transient(exc)):
+                    raise
+                logger.info(
+                    "llm_model_skipped provider=%s error=%s", provider.name, type(exc).__name__
+                )
+                continue
+            self.name = provider.name
+            return result
+        last = self._providers[-1]
+        self.name = last.name
+        return await last.ainvoke(messages, tools)
+
+
 class NoProviderAvailable(RuntimeError):
     pass
 
 
 @dataclass
 class RouterStats:
-    """Recent routing decisions, exposed for logging/monitoring."""
-
     calls: dict[str, int] = field(default_factory=dict)
     fallbacks: int = 0
     last_latency_ms: int | None = None
@@ -90,7 +111,6 @@ class ModelRouter:
         return self._clock() < self._circuit_open_until
 
     def _choose(self, language: str) -> list[tuple[ChatProvider, float]]:
-        """Ordered (provider, timeout) attempts for this call."""
         s = self._settings
         if s.llm_mode == LLMMode.LOCAL:
             order = [self._local]
@@ -101,8 +121,6 @@ class ModelRouter:
         else:
             order = [self._local, self._cloud]
         providers = [p for p in order if p is not None]
-        # The latency cap only applies to the local model when a cloud attempt follows;
-        # when it is the last option, a slow answer beats none.
         return [
             (
                 p,
@@ -123,25 +141,38 @@ class ModelRouter:
         attempts = self._choose(language)
         if not attempts:
             raise NoProviderAvailable(f"No model available for LLM mode {self._settings.llm_mode}")
+        s = self._settings
         last_error: BaseException | None = None
         for index, (provider, timeout) in enumerate(attempts):
-            start = self._clock()
-            try:
-                async with asyncio.timeout(timeout):
-                    result = await provider.ainvoke(messages, tools)
-            except Exception as exc:  # includes TimeoutError from the latency cap
-                last_error = exc
-                self._record_failure(provider)
-                logger.warning(
-                    "llm_call_failed provider=%s error=%s fallback=%s",
-                    provider.name,
-                    type(exc).__name__,
-                    index + 1 < len(attempts),
-                )
-                continue
-            latency_ms = int((self._clock() - start) * 1000)
-            self._record_success(provider, latency_ms, fallback=index > 0)
-            return result
+            is_last = index + 1 == len(attempts)
+            tries = 1 + (s.llm_retries if is_last else 0)
+            for attempt in range(tries):
+                start = self._clock()
+                try:
+                    async with asyncio.timeout(timeout):
+                        result = await provider.ainvoke(messages, tools)
+                except Exception as exc:
+                    last_error = exc
+                    if attempt + 1 < tries and _transient(exc):
+                        logger.warning(
+                            "llm_call_retry provider=%s error=%s attempt=%d",
+                            provider.name,
+                            type(exc).__name__,
+                            attempt + 1,
+                        )
+                        await asyncio.sleep(s.llm_retry_delay_seconds * 2**attempt)
+                        continue
+                    self._record_failure(provider)
+                    logger.warning(
+                        "llm_call_failed provider=%s error=%s fallback=%s",
+                        provider.name,
+                        type(exc).__name__,
+                        not is_last,
+                    )
+                    break
+                latency_ms = int((self._clock() - start) * 1000)
+                self._record_success(provider, latency_ms, fallback=index > 0)
+                return result
         raise NoProviderAvailable("All configured models failed") from last_error
 
     def _record_success(self, provider: ChatProvider, latency_ms: int, *, fallback: bool) -> None:
@@ -164,8 +195,6 @@ class ModelRouter:
 
 
 def build_router(settings: AgentSettings) -> ModelRouter:
-    """Router with real providers from settings. Cloud is only set up when its API
-    key is present; local is skipped when LLM_MODE=cloud."""
     local: ChatProvider | None = None
     if settings.llm_mode != LLMMode.CLOUD:
         from langchain_ollama import ChatOllama
@@ -176,6 +205,8 @@ def build_router(settings: AgentSettings) -> ModelRouter:
                 model=settings.local_model,
                 base_url=settings.ollama_url,
                 temperature=settings.temperature,
+                num_ctx=settings.local_context_tokens,
+                keep_alive=settings.local_keep_alive,
             ),
         )
 
@@ -184,23 +215,42 @@ def build_router(settings: AgentSettings) -> ModelRouter:
         if settings.cloud_provider == CloudProvider.GROQ and settings.groq_api_key:
             from langchain_groq import ChatGroq
 
-            cloud = LangChainProvider(
-                f"groq:{settings.cloud_model}",
-                ChatGroq(
-                    model_name=settings.cloud_model,
+            cloud = _cloud_models(
+                settings,
+                "groq",
+                lambda model, retries: ChatGroq(
+                    model_name=model,
                     api_key=settings.groq_api_key,
                     temperature=settings.temperature,
+                    reasoning_effort=settings.cloud_reasoning_effort,
+                    max_retries=retries,
+                    timeout=settings.cloud_request_timeout_seconds,
                 ),
             )
         elif settings.cloud_provider == CloudProvider.OPENAI and settings.openai_api_key:
             from langchain_openai import ChatOpenAI
 
-            cloud = LangChainProvider(
-                f"openai:{settings.cloud_model}",
-                ChatOpenAI(
-                    model=settings.cloud_model,
+            cloud = _cloud_models(
+                settings,
+                "openai",
+                lambda model, retries: ChatOpenAI(
+                    model=model,
                     api_key=settings.openai_api_key,
+                    base_url=settings.openai_base_url,
                     temperature=settings.temperature,
+                    reasoning_effort=settings.cloud_reasoning_effort,
+                    max_retries=retries,
+                    timeout=settings.cloud_request_timeout_seconds,
                 ),
             )
     return ModelRouter(settings, local, cloud)
+
+
+def _cloud_models(
+    settings: AgentSettings, prefix: str, make: Callable[[str, int], Any]
+) -> ChatProvider:
+    models = [settings.cloud_model, *settings.cloud_fallback_models]
+    providers: list[ChatProvider] = [
+        LangChainProvider(f"{prefix}:{model}", make(model, 0)) for model in models
+    ]
+    return providers[0] if len(providers) == 1 else SpilloverProvider(providers)

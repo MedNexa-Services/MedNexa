@@ -77,7 +77,6 @@ export function CancelAppointmentDialog({
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          {/* Appointment details preview */}
           <div className="p-3 bg-muted/40 rounded-lg border border-border text-xs space-y-1.5">
             <div className="flex justify-between">
               <span className="text-muted-foreground">Patient:</span>

@@ -40,7 +40,6 @@ function hourLabel(hour: number) {
   return `${hour % 12 || 12} ${hour >= 12 ? "PM" : "AM"}`;
 }
 
-/** One series of bars in the brand green, with a hover tooltip and a hidden table for screen readers. */
 function BarPanel({
   title,
   description,
@@ -109,7 +108,6 @@ function BarPanel({
   );
 }
 
-/** Labelled horizontal bars as plain HTML: the label and count are always visible. */
 function BarList({
   title,
   rows,
@@ -158,7 +156,6 @@ export default function AnalyticsPage() {
   React.useEffect(() => {
     if (!hospitalId) return;
     let cancelled = false;
-    // Calls are timestamps: the range covers whole days in the browser's time zone.
     const started_after = new Date(`${from}T00:00:00`).toISOString();
     const started_before = new Date(`${addDays(to, 1)}T00:00:00`).toISOString();
     (async () => {
@@ -185,7 +182,7 @@ export default function AnalyticsPage() {
     };
   }, [hospitalId, from, to]);
 
-  const kept = appointments.filter((a) => a.status !== "RESCHEDULED"); // a reschedule isn't a second visit
+  const kept = appointments.filter((a) => a.status !== "RESCHEDULED");
   const byPhone = kept.filter((a) => a.booking_source === "AI_CALL").length;
   const cancelled = kept.filter((a) => a.status === "CANCELLED").length;
   const visits = kept.filter((a) => a.status !== "CANCELLED");

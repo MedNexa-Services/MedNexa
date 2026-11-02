@@ -7,10 +7,10 @@ from agent.language import detect_language, normalize_language
     "text, hint, expected",
     [
         ("मुझे कल डॉक्टर से मिलना है", None, "hi"),
-        ("mujhe kal doctor se milna hai", "en", "hi"),  # Hinglish
+        ("mujhe kal doctor se milna hai", "en", "hi"),
         ("Kya aaj OPD khula hai?", None, "hi"),
-        ("I want to book an appointment tomorrow", "hi", "en"),  # plain English beats a hint
-        ("Dr. Sharma", "hi", "hi"),  # too short to tell: trust STT
+        ("I want to book an appointment tomorrow", "hi", "en"),
+        ("Dr. Sharma", "hi", "hi"),
         ("ok", None, "en"),
         ("", "hi", "hi"),
         ("haan ji", "en", "hi"),

@@ -26,6 +26,5 @@ SessionFactory = async_sessionmaker(engine, expire_on_commit=False)
 
 
 async def get_db() -> AsyncIterator[AsyncSession]:
-    """FastAPI dependency: one session per request, committed by the service layer."""
     async with SessionFactory() as session:
         yield session

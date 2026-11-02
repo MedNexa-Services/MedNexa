@@ -40,7 +40,6 @@ async def _domain_error(_: Request, error: Exception) -> JSONResponse:
 
 
 async def _integrity_error(_: Request, error: Exception) -> JSONResponse:
-    # Safety net: services translate the constraints they expect into domain errors.
     logger.warning("Unhandled integrity error: %s", error)
     return JSONResponse(
         _body("conflict", "The request conflicts with existing data"),

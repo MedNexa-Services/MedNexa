@@ -27,8 +27,8 @@ import { AlertCircle } from "lucide-react";
 interface HospitalInfoDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  entry?: HospitalInfoOut | null; // If editing
-  defaultCategory?: string; // Pre-select category when adding inline
+  entry?: HospitalInfoOut | null;
+  defaultCategory?: string;
   existingCategories: string[];
   onSuccess: () => void;
 }
@@ -138,7 +138,6 @@ export function HospitalInfoDialog({
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4 pt-1">
-          {/* Category Input / Selection */}
           <div className="space-y-1.5">
             <Label htmlFor="faq-category" className="text-xs font-semibold">
               Category *
@@ -162,7 +161,6 @@ export function HospitalInfoDialog({
             </p>
           </div>
 
-          {/* Question Input */}
           <div className="space-y-1.5">
             <Label htmlFor="faq-question" className="text-xs font-semibold">
               Question or Query *
@@ -180,7 +178,6 @@ export function HospitalInfoDialog({
             </p>
           </div>
 
-          {/* Answer Textarea */}
           <div className="space-y-1.5">
             <Label htmlFor="faq-answer" className="text-xs font-semibold">
               Verified Hospital Answer *

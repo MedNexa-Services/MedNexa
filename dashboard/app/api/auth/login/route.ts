@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import { TOKEN_COOKIE, apiUrl, cookieOptions } from "@/lib/auth/token";
 
-// Signs in against the backend (the only place credentials are checked) and keeps the
-// JWT it returns in an httpOnly cookie. The browser only ever receives the user's profile.
 export async function POST(request: Request) {
   let body: { email?: unknown; password?: unknown };
   try {
@@ -14,7 +12,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Email and password are required" }, { status: 400 });
   }
 
-  // Pass the browser's address along so the backend throttles per person, not per dashboard.
   const forwarded = request.headers.get("x-forwarded-for");
   let upstream: Response;
   try {

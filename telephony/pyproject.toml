@@ -1,7 +1,7 @@
 [project]
 name = "mednexa-telephony"
 version = "0.1.0"
-description = "MedNexa Part 3 -- Voice/Telephony pipeline (STT, TTS, VAD, call management)"
+description = "MedNexa telephony: speech recognition, voice and call handling"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -29,7 +29,6 @@ dependencies = [
     # Audio processing
     "numpy>=1.26",
     "soundfile>=0.12",
-    "pydub>=0.25",
     "aiofiles>=23.2",
 
     # Twilio (prototype telephony)

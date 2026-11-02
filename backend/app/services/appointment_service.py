@@ -1,15 +1,3 @@
-"""Booking, cancellation and rescheduling.
-
-Concurrency: every write that takes a slot first locks the doctor's row
-(SELECT ... FOR UPDATE), so availability checks, the daily cap and token
-assignment for one doctor happen one transaction at a time. The partial unique
-index on BOOKED slots is the final safety net. Lock order is always
-doctor -> appointment, so these operations cannot deadlock each other.
-
-Functions taking `caller_phone` are for the AI agent and enforce ownership;
-the `*_by_staff` variants are for the admin dashboard.
-"""
-
 import re
 import uuid
 from datetime import UTC, date, datetime, time
@@ -36,13 +24,10 @@ from app.core.timeutils import hospital_now
 from app.models import Appointment, AppointmentStatus, BookingSource, Doctor, Hospital, Patient
 from app.schemas.appointment import AppointmentOut, BookingConfirmation, BookingRequest
 from app.services.common import paginate
-from app.services.patient_service import find_patient, upsert_patient
+from app.services.patient_service import find_patient, find_patient_by_sound, upsert_patient
 from app.services.slot_service import DayPlan, is_bookable_doctor, load_day_plan
 
 SLOT_INDEX = "uq_appointment_doctor_slot_booked"
-
-
-# --- internals ----------------------------------------------------------------------
 
 
 async def _lock_doctor(db: AsyncSession, doctor_id: uuid.UUID) -> Doctor:
@@ -82,7 +67,6 @@ async def _doctor_id_of(db: AsyncSession, appointment_id: uuid.UUID) -> uuid.UUI
 
 
 def _check_slot(plan: DayPlan, at: time, patient_id: uuid.UUID) -> None:
-    """Raise the most specific reason why `at` can't be booked, if any."""
     if plan.is_past_date or (plan.not_before is not None and at <= plan.not_before):
         raise InvalidSlot("That time has already passed")
     if not plan.grid:
@@ -99,7 +83,6 @@ def _check_slot(plan: DayPlan, at: time, patient_id: uuid.UUID) -> None:
 
 
 async def _next_token(db: AsyncSession, doctor_id: uuid.UUID, on: date) -> int:
-    """Next per-doctor, per-day token. Caller must hold the doctor lock."""
     current = await db.scalar(
         select(func.max(Appointment.token_number)).where(
             Appointment.doctor_id == doctor_id, Appointment.appointment_date == on
@@ -166,14 +149,9 @@ def _ensure_changeable(appt: Appointment, *, allow_past: bool, now: datetime | N
         raise NotCancellable("Appointment time has already passed")
 
 
-# --- booking ------------------------------------------------------------------------
-
-
 async def book_appointment(
     db: AsyncSession, req: BookingRequest, *, now: datetime | None = None
 ) -> BookingConfirmation:
-    """Book a slot. Raises NotFound, DomainValidationError, InvalidSlot,
-    SlotUnavailable, DuplicateBooking or DailyCapReached. Commits on success."""
     try:
         doctor = await _lock_doctor(db, req.doctor_id)
         if not is_bookable_doctor(doctor):
@@ -199,9 +177,6 @@ async def book_appointment(
     except Exception:
         await db.rollback()
         raise
-
-
-# --- cancellation -------------------------------------------------------------------
 
 
 async def _cancel(
@@ -237,19 +212,13 @@ async def cancel_appointment(
     *,
     now: datetime | None = None,
 ) -> AppointmentOut:
-    """Caller cancellation: phone must own the appointment and it must be upcoming.
-    Raises NotFound, NotOwner or NotCancellable."""
     return await _cancel(db, appointment_id, reason, caller_phone=caller_phone, now=now)
 
 
 async def cancel_appointment_by_staff(
     db: AsyncSession, appointment_id: uuid.UUID, reason: str | None = None
 ) -> AppointmentOut:
-    """Staff cancellation: no ownership check; past BOOKED appointments allowed."""
     return await _cancel(db, appointment_id, reason, caller_phone=None, now=None)
-
-
-# --- rescheduling -------------------------------------------------------------------
 
 
 async def _reschedule(
@@ -272,7 +241,6 @@ async def _reschedule(
         if (old.appointment_date, old.appointment_time) == (new_date, new_time):
             raise InvalidSlot("The new time is the same as the current appointment")
 
-        # Free the old slot first so it doesn't count against the cap on the same day.
         old.status = AppointmentStatus.RESCHEDULED
         await db.flush()
         plan = await load_day_plan(db, doctor, new_date, now)
@@ -307,8 +275,6 @@ async def reschedule_appointment(
     *,
     now: datetime | None = None,
 ) -> BookingConfirmation:
-    """Caller reschedule to another slot with the same doctor. The old appointment
-    becomes RESCHEDULED and the new one links back to it via rescheduled_from_id."""
     return await _reschedule(
         db, appointment_id, new_date, new_time, caller_phone=caller_phone, now=now
     )
@@ -320,9 +286,6 @@ async def reschedule_appointment_by_staff(
     return await _reschedule(db, appointment_id, new_date, new_time, caller_phone=None, now=None)
 
 
-# --- caller lookups -----------------------------------------------------------------
-
-
 async def get_patient_appointments(
     db: AsyncSession,
     hospital_id: uuid.UUID,
@@ -332,20 +295,13 @@ async def get_patient_appointments(
     *,
     now: datetime | None = None,
 ) -> list[AppointmentOut]:
-    """Appointments of the patient identified by phone + name (the caller check).
-
-    upcoming_only=True returns only BOOKED appointments that haven't started yet
-    (hospital-local time), i.e. the ones a caller can still cancel or move.
-    upcoming_only=False returns the full history in every status.
-
-    Returns an empty list when no patient matches, so callers can't probe
-    which phone/name pairs exist.
-    """
     try:
         phone = normalize_phone(phone)
     except ValueError:
         return []
     patient = await find_patient(db, hospital_id, phone, patient_name)
+    if patient is None:
+        patient = await find_patient_by_sound(db, hospital_id, phone, patient_name)
     if patient is None:
         return []
     query = (
@@ -370,9 +326,6 @@ async def get_patient_appointments(
             ),
         )
     return [AppointmentOut.from_model(a) for a in await db.scalars(query)]
-
-
-# --- staff / dashboard --------------------------------------------------------------
 
 
 async def get_appointment(db: AsyncSession, appointment_id: uuid.UUID) -> AppointmentOut:
@@ -400,7 +353,6 @@ async def list_appointments(
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[AppointmentOut], int]:
-    """`q` matches the patient's name, part of their phone number, or a token number."""
     stmt = select(Appointment).options(
         selectinload(Appointment.patient), selectinload(Appointment.doctor)
     )

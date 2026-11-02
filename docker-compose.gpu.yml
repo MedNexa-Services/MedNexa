@@ -1,0 +1,12 @@
+# Runs the local LLM on an NVIDIA GPU (Linux with the NVIDIA Container Toolkit, or
+# Docker Desktop on Windows with WSL 2 and a current NVIDIA driver):
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

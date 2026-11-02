@@ -1,12 +1,3 @@
-"""Create three sample call sessions (booked, FAQ in Hindi, emergency escalation)
-with transcripts, so the dashboard's call-log screens have something to show.
-
-    python scripts/seed_calls.py [API_URL]      # default http://127.0.0.1:8000/api/v1
-
-Needs the backend running with the sample data (cd backend && uv run python -m
-scripts.seed); it uses the first hospital and, if there is one, the first
-booked appointment. Requires httpx.
-"""
 
 import sys
 
@@ -40,7 +31,6 @@ with httpx.Client(event_hooks={"response": [raise_on_error]}) as client:
         else "A booking was made."
     )
 
-    # Call 1: Booked Appointment
     c1 = client.post(
         f"{API}/calls",
         json={
@@ -113,7 +103,6 @@ with httpx.Client(event_hooks={"response": [raise_on_error]}) as client:
         },
     )
 
-    # Call 2: FAQ Enquiry in Hindi
     c2 = client.post(
         f"{API}/calls",
         json={
@@ -171,7 +160,6 @@ with httpx.Client(event_hooks={"response": [raise_on_error]}) as client:
         },
     )
 
-    # Call 3: Emergency Escalation
     c3 = client.post(
         f"{API}/calls",
         json={

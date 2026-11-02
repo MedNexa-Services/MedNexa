@@ -7,8 +7,6 @@ from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 
 class HospitalInfo(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """FAQ-style entries the AI agent answers from (parking, OPD timings, ...)."""
-
     __tablename__ = "hospital_info"
 
     hospital_id: Mapped[uuid.UUID] = mapped_column(

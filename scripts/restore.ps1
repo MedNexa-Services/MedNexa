@@ -1,4 +1,4 @@
-# MedNexa database restore for Windows (Part 5, task 5.12). Same behaviour as restore.sh:
+# MedNexa database restore for Windows. Same behaviour as restore.sh:
 # replaces the database contents with the backup in ONE transaction (all or nothing).
 #
 #   .\scripts\restore.ps1 -BackupFile .\backups\mednexa_backup_<timestamp>.sql.gz [-Yes]

@@ -1,8 +1,7 @@
-# MedNexa Backend (Part 1)
+# MedNexa backend
 
-Database, service layer and REST API for MedNexa. The AI agent (Part 2) calls the
-service layer directly; the admin dashboard (Part 4) and call pipeline (Part 3) use
-the REST API.
+Database, service layer and REST API for MedNexa. The AI agent calls the service
+layer directly; the dashboard and the call pipeline use the REST API.
 
 **Stack:** Python 3.11+ · FastAPI · SQLAlchemy 2.1 (async) · asyncpg · Alembic · PostgreSQL 16 · uv
 
@@ -62,7 +61,7 @@ app/
 ├── models/              SQLAlchemy models + enums
 ├── schemas/             Pydantic DTOs (request/response)
 ├── services/            business logic: the ONLY layer that touches the DB
-│   └── contracts.py     the functions Part 2's agent tools wrap
+│   └── contracts.py     the functions the agent's tools wrap
 ├── api/
 │   ├── deps.py          DB session, pagination, require_staff auth hook
 │   ├── errors.py        domain exception -> HTTP mapping
@@ -88,7 +87,7 @@ tests/                   pytest suite against real Postgres
 | Time | Appointment date/time are hospital-local; "today" and "already passed" use `hospital.timezone` |
 | Phone numbers | Stored as `+<country><number>`; `98765 43210`, `098765-43210` and `+91 98765 43210` are the same number |
 
-## For Part 2 (AI agent)
+## For the AI agent
 
 Import only from `app.services.contracts`:
 
@@ -108,13 +107,13 @@ await contracts.cancel_appointment(db, appointment_id, caller_phone=state.caller
 - Write functions commit their own transaction.
 - Caller cancel/reschedule check that `caller_phone` owns the appointment.
 
-## For Part 3 (call pipeline)
+## For the call pipeline
 
 Persist calls through the REST API: `POST /api/v1/calls` at the start,
 `POST /api/v1/calls/{id}/logs` for each turn or tool call, and
 `POST /api/v1/calls/{id}/end` with the outcome.
 
-## For Part 4 (dashboard)
+## For the dashboard
 
 The OpenAPI spec is at `/openapi.json` (interactive docs at `/docs`); generate a
 typed client from it. Lists return `{items, total, limit, offset}` and take
@@ -136,7 +135,7 @@ Every `/api/v1` route except `/health` and `/auth/login` needs a staff token
 - The telephony service authenticates with `MEDNEXA_SERVICE_API_KEY`, which works on
   the `/calls` routes only and opens nothing else.
 
-## For Part 5 (DevOps)
+## Deployment
 
 - Authentication is implemented (see above); every route except `/api/v1/health` and
   `/api/v1/auth/login` depends on `require_staff`.

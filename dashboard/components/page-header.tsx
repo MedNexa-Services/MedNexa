@@ -1,6 +1,5 @@
 import * as React from "react";
 
-/** Page title, an optional line of context under it, and the page's actions. */
 export function PageHeader({
   title,
   description,
@@ -26,7 +25,6 @@ export function PageHeader({
   );
 }
 
-/** A few figures in one row, divided by rules (instead of a card per number). */
 export function StatStrip({
   items,
 }: {

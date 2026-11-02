@@ -1,4 +1,4 @@
-# MedNexa: full stack (Part 5, task 5.1).
+# MedNexa: the whole system in Docker.
 #
 #   cp .env.example .env     # then fill in the required secrets (see the file)
 #   docker compose up --build -d
@@ -11,7 +11,7 @@
 x-database-url: &database-url postgresql+asyncpg://${POSTGRES_USER:-mednexa}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-mednexa}
 
 services:
-  # ── Data layer ──────────────────────────────────────────────────────────────
+  # Data layer
   db:
     image: postgres:16-alpine
     container_name: mednexa-db
@@ -64,7 +64,7 @@ services:
     networks:
       - mednexa-net
 
-  # ── Backend API (Part 1) ────────────────────────────────────────────────────
+  # Backend API
   api:
     build:
       context: ./backend
@@ -102,7 +102,7 @@ services:
     networks:
       - mednexa-net
 
-  # ── Admin dashboard (Part 4) ────────────────────────────────────────────────
+  # Admin dashboard
   dashboard:
     build:
       context: ./dashboard
@@ -131,7 +131,7 @@ services:
     networks:
       - mednexa-net
 
-  # ── Voice / telephony gateway (Part 3 + the Part 2 agent) ───────────────────
+  # Voice / telephony gateway
   telephony:
     build:
       context: .
@@ -140,7 +140,7 @@ services:
     ports:
       - "8001:8001" # Twilio webhook / media stream: expose through an HTTPS proxy
     environment:
-      # The agent reads the database directly (Part 2's service layer)...
+      # The agent reads the database directly through the backend's service layer...
       MEDNEXA_DATABASE_URL: *database-url
       # ...and the pipeline writes call logs through the API with the service key.
       MEDNEXA_TEL_BACKEND_URL: http://api:8000
@@ -153,16 +153,22 @@ services:
       MEDNEXA_TEL_TWILIO_AUTH_TOKEN: ${MEDNEXA_TEL_TWILIO_AUTH_TOKEN:-}
       MEDNEXA_TEL_TWILIO_PHONE_NUMBER: ${MEDNEXA_TEL_TWILIO_PHONE_NUMBER:-}
       MEDNEXA_TEL_TRANSFER_PHONE_NUMBER: ${MEDNEXA_TEL_TRANSFER_PHONE_NUMBER:-}
+      MEDNEXA_TEL_WEB_CALL_ENABLED: ${MEDNEXA_TEL_WEB_CALL_ENABLED:-true}
       MEDNEXA_TEL_TTS_ENGINE: ${MEDNEXA_TEL_TTS_ENGINE:-edge}
       MEDNEXA_TEL_WHISPER_MODEL_SIZE: ${MEDNEXA_TEL_WHISPER_MODEL_SIZE:-base}
       MEDNEXA_TEL_WHISPER_DEVICE: ${MEDNEXA_TEL_WHISPER_DEVICE:-cpu}
       MEDNEXA_AGENT_LLM_MODE: ${MEDNEXA_AGENT_LLM_MODE:-auto}
-      MEDNEXA_AGENT_OLLAMA_URL: http://ollama:11434
+      MEDNEXA_AGENT_OLLAMA_URL: ${MEDNEXA_AGENT_OLLAMA_URL:-http://ollama:11434}
       MEDNEXA_AGENT_LOCAL_MODEL: ${MEDNEXA_AGENT_LOCAL_MODEL:-llama3.1:8b}
+      MEDNEXA_AGENT_LOCAL_CONTEXT_TOKENS: ${MEDNEXA_AGENT_LOCAL_CONTEXT_TOKENS:-8192}
       MEDNEXA_AGENT_CLOUD_PROVIDER: ${MEDNEXA_AGENT_CLOUD_PROVIDER:-groq}
-      MEDNEXA_AGENT_CLOUD_MODEL: ${MEDNEXA_AGENT_CLOUD_MODEL:-llama-3.3-70b-versatile}
+      MEDNEXA_AGENT_CLOUD_MODEL: ${MEDNEXA_AGENT_CLOUD_MODEL:-openai/gpt-oss-20b}
+      MEDNEXA_AGENT_CLOUD_FALLBACK_MODELS: ${MEDNEXA_AGENT_CLOUD_FALLBACK_MODELS:-[]}
+      MEDNEXA_AGENT_CLOUD_REASONING_EFFORT: ${MEDNEXA_AGENT_CLOUD_REASONING_EFFORT:-}
+      MEDNEXA_AGENT_CONFIRM_CHANGES: ${MEDNEXA_AGENT_CONFIRM_CHANGES:-true}
       MEDNEXA_AGENT_GROQ_API_KEY: ${MEDNEXA_AGENT_GROQ_API_KEY:-}
       MEDNEXA_AGENT_OPENAI_API_KEY: ${MEDNEXA_AGENT_OPENAI_API_KEY:-}
+      MEDNEXA_AGENT_OPENAI_BASE_URL: ${MEDNEXA_AGENT_OPENAI_BASE_URL:-}
     depends_on:
       api:
         condition: service_healthy
@@ -170,9 +176,10 @@ services:
     networks:
       - mednexa-net
 
-  # ── Local LLM (Ollama) ──────────────────────────────────────────────────────
+  # Local LLM (Ollama)
   # Internal only: Ollama has no authentication. Pull a model once after the first start:
   #   docker compose exec ollama ollama pull llama3.1:8b
+  # On an NVIDIA GPU add docker-compose.gpu.yml, or Ollama runs on the CPU.
   # (Pin the image to a specific version for production.)
   ollama:
     image: ollama/ollama:latest

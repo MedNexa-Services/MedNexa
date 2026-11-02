@@ -1,5 +1,3 @@
-"""Twilio webhook + Media Streams handler: request validation, TwiML and stream SIDs."""
-
 from __future__ import annotations
 
 import asyncio
@@ -44,9 +42,6 @@ def stream_token_from(twiml: str) -> str:
     return match.group(1)
 
 
-# ── webhook ───────────────────────────────────────────────────────────────────
-
-
 def test_unsigned_webhook_is_refused(client: TestClient) -> None:
     assert client.post("/twilio/voice", data=FORM).status_code == 403
 
@@ -77,9 +72,6 @@ def test_webhook_is_open_when_no_auth_token_is_configured(
     assert client.post("/twilio/voice", data=FORM).status_code == 200
 
 
-# ── media stream ──────────────────────────────────────────────────────────────
-
-
 @pytest.fixture()
 def fake_backend(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     backend = AsyncMock()
@@ -91,7 +83,6 @@ def fake_backend(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
 
 @pytest.fixture()
 def fake_pipeline(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
-    """A pipeline that plays one chunk of audio and then ends the call."""
     created = MagicMock()
 
     class Pipeline:
@@ -124,13 +115,12 @@ def test_stream_with_valid_token_uses_stream_sid_and_signed_caller(
         outbound = json.loads(ws.receive_text())
 
     assert outbound["event"] == "media"
-    assert outbound["streamSid"] == "MZ999"  # not the call SID
-    assert len(base64.b64decode(outbound["media"]["payload"])) == 80  # 160 samples @16k -> 80 @8k
-    # The caller number comes from the signed webhook, not the stream parameters.
+    assert outbound["streamSid"] == "MZ999"
+    assert len(base64.b64decode(outbound["media"]["payload"])) == 80
     fake_backend.start_call.assert_awaited_once()
     assert fake_backend.start_call.await_args.args[1] == "+919876543210"
     fake_pipeline.assert_called_once_with("session-1", "+919876543210")
-    assert token not in twilio_handler._pending_streams  # single use
+    assert token not in twilio_handler._pending_streams
 
 
 @pytest.mark.parametrize("token", ["forged-token", None])
@@ -154,9 +144,6 @@ def test_token_is_bound_to_its_call(
         with pytest.raises(WebSocketDisconnect):
             ws.receive_text()
     fake_pipeline.assert_not_called()
-
-
-# ── transfer to staff ─────────────────────────────────────────────────────────
 
 
 def test_transfer_redirects_the_call_to_the_staff_number(monkeypatch: pytest.MonkeyPatch) -> None:

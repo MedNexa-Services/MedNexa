@@ -1,13 +1,10 @@
-// Display formats shared by every page.
 
-/** "14:00:00" -> "2:00 PM" */
 export function formatTime(time: string): string {
   const [h, m] = time.split(":");
   const hour = Number(h);
   return `${hour % 12 || 12}:${m} ${hour >= 12 ? "PM" : "AM"}`;
 }
 
-/** "2026-10-31" -> "Sat 31 Oct" (add the year when it isn't this year) */
 export function formatDate(iso: string, options: { weekday?: boolean } = {}): string {
   const date = new Date(`${iso}T00:00:00`);
   const sameYear = date.getFullYear() === new Date().getFullYear();
@@ -19,7 +16,6 @@ export function formatDate(iso: string, options: { weekday?: boolean } = {}): st
   }).format(date);
 }
 
-/** An ISO timestamp -> "31 Oct, 2:05 PM" */
 export function formatDateTime(timestamp: string): string {
   return new Intl.DateTimeFormat("en-IN", {
     day: "numeric",
@@ -32,7 +28,6 @@ export function formatDateTime(timestamp: string): string {
     .replace(/am|pm/, (s) => s.toUpperCase());
 }
 
-/** Seconds -> "4 min 05 s" / "45 s" */
 export function formatDuration(seconds: number): string {
   const s = Math.max(0, Math.round(seconds));
   if (s < 60) return `${s} s`;
@@ -51,7 +46,6 @@ export function initials(name: string): string {
 
 const GENDER: Record<string, string> = { MALE: "Male", FEMALE: "Female", OTHER: "Other" };
 
-/** "34 yrs, Female" (whatever is known) */
 export function describePatient(p: { age: number | null; gender: string | null }): string {
   return [p.age !== null ? `${p.age} yrs` : null, p.gender ? GENDER[p.gender] : null].filter(Boolean).join(", ");
 }

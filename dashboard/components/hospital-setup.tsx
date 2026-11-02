@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-/** First run: the database has no hospital, so nothing else can work until one exists. */
 export function HospitalSetup() {
   const { refreshHospital } = useHospital();
   const [saving, setSaving] = React.useState(false);

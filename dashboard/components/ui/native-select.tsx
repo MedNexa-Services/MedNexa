@@ -2,7 +2,6 @@ import * as React from "react";
 import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-/** A plain <select>, styled like the inputs (native menus work well with keyboards and phones). */
 export function NativeSelect({ className, children, ...props }: React.ComponentProps<"select">) {
   return (
     <div className={cn("relative", className)}>

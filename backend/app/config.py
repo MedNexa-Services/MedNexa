@@ -18,29 +18,19 @@ class Settings(BaseSettings):
         "http://localhost:3001",
         "http://127.0.0.1:3001",
     ]
-    # Prefixed to 10-digit local numbers when normalizing phones (91 = India).
     default_country_code: str = "91"
 
-    # Authentication (Part 5 - Task 5.3). There are no defaults for secrets or
-    # credentials on purpose: the server refuses to start until they are set
-    # (see require_auth_config), so nobody ever runs with a published key.
-    auth_enabled: bool = True  # False only for local development without login
-    jwt_secret: str = ""  # 32+ random characters: `openssl rand -hex 32`
+    auth_enabled: bool = True
+    jwt_secret: str = ""
     jwt_access_token_expire_minutes: int = 120
     admin_email: str = ""
     admin_name: str = "Hospital Staff"
-    # Plain, or a PBKDF2 hash made with `python -m app.core.security`.
     admin_password: str = ""
-    # Lets the telephony service (Part 3) write call logs without a staff login. It is
-    # accepted on the /calls routes only. Empty = disabled.
     service_api_key: str = ""
 
-    # Call sessions and their transcripts are deleted this many days after the call
-    # (patient data is kept no longer than needed). 0 keeps them forever.
     call_log_retention_days: int = 90
 
     def require_auth_config(self) -> None:
-        """Raise RuntimeError, listing every problem, if auth is enabled but unusable."""
         if not self.auth_enabled:
             return
         problems = []

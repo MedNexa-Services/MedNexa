@@ -67,10 +67,42 @@ def test_receptionist_phrases_are_not_mistaken_for_advice(text: str) -> None:
         "Your token number is 7.",
         "Your appointment has been cancelled.",
         "आपकी अपॉइंटमेंट बुक हो गई है।",
+        "You're booked for 9:10 AM tomorrow with Dr. Suresh Patel. Is that correct?",
+        "Your slot at 9:10 AM on Tuesday, 3 November is confirmed.",
+        "Your appointment is set for tomorrow at 9:10 AM.",
     ],
 )
 def test_claims_without_tool_success_are_blocked(text: str) -> None:
     assert check(text).violations == ["ungrounded_claim"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Those slots are booked. How about 10 AM?",
+        "Dr. Sharma is booked on Monday morning, but he is free in the afternoon.",
+        "Shall I confirm the booking for 9 AM tomorrow?",
+        "Just to confirm: Rohan Mehta with Dr. Suresh Patel at 9:10 AM. Shall I go ahead?",
+        "You're all set to come in whenever you like. Is there anything else?",
+    ],
+)
+def test_talking_about_availability_or_asking_to_confirm_is_not_a_claim(text: str) -> None:
+    assert not check(text).changed
+
+
+def test_a_false_claim_after_a_check_is_replaced_by_the_read_back() -> None:
+    readback = (
+        "Just to confirm: Rohan Mehta with Dr. Anil Sharma on Monday at 9:00 AM. Shall I book it?"
+    )
+    check_only = CallEvent(
+        "book_appointment",
+        "book",
+        False,
+        {"error": "needs_confirmation", "readback": readback},
+    )
+    result = check("You're booked for Monday at 9 AM. Is that correct?", events(check_only))
+    assert result.text == readback
+    assert result.violations == ["ungrounded_claim"]
 
 
 def test_claims_backed_by_tool_results_pass() -> None:

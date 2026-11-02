@@ -1,5 +1,3 @@
-"""Service-level tests for the agent lookups and admin helpers not covered elsewhere."""
-
 import asyncio
 from datetime import UTC, datetime, time, timedelta
 
@@ -73,7 +71,7 @@ async def test_get_doctor_includes_upcoming_overrides(db) -> None:
 
 async def test_override_upsert_replaces_and_validates(db) -> None:
     hospital = await make_hospital(db)
-    doctor = await make_doctor(db, hospital)  # template 09:00-12:00
+    doctor = await make_doctor(db, hospital)
     await schedule_service.upsert_override(
         db, doctor.id, ScheduleOverrideIn(date=MONDAY, is_available=False)
     )
@@ -83,7 +81,7 @@ async def test_override_upsert_replaces_and_validates(db) -> None:
     assert updated.is_available and updated.start_time == time(10)
     assert len(await schedule_service.list_overrides(db, doctor.id, None, None)) == 1
 
-    with pytest.raises(DomainValidationError):  # start after template end: no working time
+    with pytest.raises(DomainValidationError):
         await schedule_service.upsert_override(
             db, doctor.id, ScheduleOverrideIn(date=MONDAY, start_time=time(13))
         )
@@ -117,12 +115,12 @@ async def test_call_lifecycle(db) -> None:
     )
 
     detail = await call_service.get_call(db, session.id)
-    assert detail.total_turns == 2  # tool entries don't count as turns
+    assert detail.total_turns == 2
     assert [log.role for log in detail.logs] == [CallRole.ASSISTANT, CallRole.USER, CallRole.TOOL]
     assert detail.call_end is not None
     assert detail.call_end - detail.call_start < timedelta(minutes=1)
 
-    call_id = session.id  # a rejected write rolls back and expires loaded objects
+    call_id = session.id
     with pytest.raises(DomainValidationError):
         await call_service.append_log(db, call_id, CallLogCreate(role=CallRole.USER, content="x"))
     with pytest.raises(DomainValidationError):
@@ -136,7 +134,6 @@ async def test_doctor_search_treats_wildcards_literally(db) -> None:
 
     for pattern in ("%", "_", "Cardi_logy"):
         assert await contracts.list_doctors(db, hospital.id, speciality=pattern) == []
-    # A blank filter means "no filter" when listing.
     assert len(await contracts.list_doctors(db, hospital.id, speciality="   ")) == 2
 
 
@@ -190,7 +187,6 @@ async def test_concurrent_logs_and_end_never_leave_logs_on_ended_call(db, sessio
     async with session_factory() as fresh:
         detail = await call_service.get_call(fresh, call.id)
     assert detail.total_turns == len(detail.logs) == len(accepted)
-    # Every accepted log committed before the call ended (row lock serialises them).
     assert all(log.timestamp <= detail.call_end for log in detail.logs)
 
 
@@ -206,6 +202,40 @@ async def test_override_upsert_bumps_updated_at(db) -> None:
     )
     assert second.created_at == created_at
     assert second.updated_at > first_updated
+
+
+async def test_calls_that_were_never_ended_are_closed_after_half_an_hour(db) -> None:
+    hospital = await make_hospital(db)
+    ids = {}
+    for name, age_minutes, ended in [
+        ("running", 5, False),
+        ("cut_off", 45, False),
+        ("cut_off_silent", 90, False),
+        ("finished", 120, True),
+    ]:
+        session = await call_service.start_call(
+            db, CallSessionCreate(hospital_id=hospital.id, caller_phone="9876543210")
+        )
+        if name != "cut_off_silent":
+            await call_service.append_log(
+                db, session.id, CallLogCreate(role=CallRole.USER, content="Hello")
+            )
+        if ended:
+            await call_service.end_call(
+                db, session.id, CallSessionEnd(call_outcome=CallOutcome.BOOKED)
+            )
+        session.call_start = datetime.now(UTC) - timedelta(minutes=age_minutes)
+        ids[name] = session.id
+    await db.commit()
+
+    assert await call_service.close_stale_calls(db) == 2
+    calls = {c.id: c for c in (await call_service.list_calls(db, hospital_id=hospital.id))[0]}
+    assert calls[ids["running"]].call_end is None
+    assert calls[ids["cut_off"]].call_end is not None
+    assert calls[ids["cut_off"]].call_outcome == CallOutcome.ABANDONED
+    assert calls[ids["cut_off_silent"]].call_end == calls[ids["cut_off_silent"]].call_start
+    assert calls[ids["finished"]].call_outcome == CallOutcome.BOOKED
+    assert await call_service.close_stale_calls(db) == 0
 
 
 async def test_purge_deletes_only_calls_past_the_retention_period(db) -> None:
@@ -225,7 +255,7 @@ async def test_purge_deletes_only_calls_past_the_retention_period(db) -> None:
     assert await call_service.purge_calls_older_than(db, 90) == 2
     remaining, _ = await call_service.list_calls(db, hospital_id=hospital.id)
     assert {c.id for c in remaining} == set(sessions[:2])
-    assert await db.scalar(select(func.count()).select_from(CallLog)) == 2  # logs cascade
+    assert await db.scalar(select(func.count()).select_from(CallLog)) == 2
 
     with pytest.raises(ValueError):
         await call_service.purge_calls_older_than(db, 0)

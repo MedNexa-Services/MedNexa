@@ -34,14 +34,14 @@ def _staff_from(credentials: HTTPAuthorizationCredentials | None) -> dict[str, A
         return decode_access_token(credentials.credentials)
     except ValueError as exc:
         raise _unauthorized(f"Invalid authentication token: {exc}") from exc
-    except RuntimeError as exc:  # server misconfiguration: never accept anything
+    except RuntimeError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Authentication unavailable"
         ) from exc
 
 
 async def require_staff(credentials: BearerCredentials = None) -> dict[str, Any]:
-    """Authentication for every protected /api/v1 route (Part 5 - Task 5.3).
+    """Authentication for every protected /api/v1 route.
 
     Requires a valid staff JWT (Authorization: Bearer ...) and returns its payload,
     or raises 401.

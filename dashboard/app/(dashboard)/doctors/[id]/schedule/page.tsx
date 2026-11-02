@@ -25,7 +25,6 @@ import { cn } from "@/lib/utils";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-/** Monday-first weeks covering the month; days outside it are null. */
 function monthGrid(year: number, month: number): (string | null)[] {
   const first = new Date(Date.UTC(year, month, 1));
   const days = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();

@@ -1,7 +1,6 @@
 import type { AppointmentStatus, BookingSource, CallOutcome } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-// Colour is reserved for status, and always comes with a word (never colour alone).
 const APPOINTMENT: Record<AppointmentStatus, { label: string; tone: string }> = {
   BOOKED: { label: "Booked", tone: "bg-status-booked" },
   COMPLETED: { label: "Completed", tone: "bg-status-done" },

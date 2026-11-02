@@ -10,8 +10,6 @@ from app.models.hospital import Hospital
 
 
 class Doctor(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """The doctor's fields are the weekly template; `Schedule` rows override single dates."""
-
     __tablename__ = "doctor"
     __table_args__ = (
         CheckConstraint("slot_duration_minutes > 0", name="slot_duration_positive"),
@@ -27,7 +25,6 @@ class Doctor(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     department: Mapped[str] = mapped_column(String(100))
     max_daily_appointments: Mapped[int]
     slot_duration_minutes: Mapped[int]
-    # ISO weekdays, Monday = 1 ... Sunday = 7
     available_days: Mapped[list[int]] = mapped_column(JSONB)
     slot_start_time: Mapped[time]
     slot_end_time: Mapped[time]

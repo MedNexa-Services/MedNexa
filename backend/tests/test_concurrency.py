@@ -1,5 +1,3 @@
-"""Race tests: many sessions booking at the same moment against real Postgres."""
-
 import asyncio
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo

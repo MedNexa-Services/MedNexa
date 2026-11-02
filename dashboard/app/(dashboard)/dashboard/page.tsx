@@ -23,7 +23,6 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
-// Appointments that belong in a doctor's queue (cancelled and moved ones have left it).
 const IN_QUEUE = new Set(["BOOKED", "COMPLETED", "NO_SHOW"]);
 
 interface DoctorDay {
@@ -36,7 +35,6 @@ interface DoctorDay {
   queue: AppointmentOut[];
 }
 
-/** The doctor's hours on `date`: a schedule override wins over the weekly template. */
 function dayFor(
   doctor: DoctorOut,
   date: string,
@@ -100,7 +98,6 @@ export default function TodayPage() {
           return {
             doctor,
             ...dayFor(doctor, date, overrides[0]),
-            // Free times in the doctor's hours, but never more than the daily cap allows.
             openSlots: Math.min(slots.length, Math.max(0, doctor.max_daily_appointments - booked)),
             queue,
           };
@@ -108,7 +105,6 @@ export default function TodayPage() {
       );
       setAppointments(appts.items);
       setDoctorCount(doctors.total);
-      // Doctors on duty, plus anyone off duty who still has patients booked that day.
       setDays(perDoctor.filter((d) => d.onDuty || d.queue.length > 0));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Today's queue could not be loaded.");
@@ -119,7 +115,7 @@ export default function TodayPage() {
 
   React.useEffect(() => {
     load();
-    const timer = setInterval(load, 60_000); // calls book appointments while this is open
+    const timer = setInterval(load, 60_000);
     return () => clearInterval(timer);
   }, [load]);
 

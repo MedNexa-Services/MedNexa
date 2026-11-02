@@ -1,4 +1,4 @@
-# MedNexa database backup for Windows (Part 5, task 5.12). Same behaviour as backup.sh:
+# MedNexa database backup for Windows. Same behaviour as backup.sh:
 # the dump is made inside the database container, checked, and only then moved into
 # place; retention runs only after a good backup.
 #

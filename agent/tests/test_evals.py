@@ -1,5 +1,3 @@
-"""The evaluation harness, driven by a scripted LLM (real runs use a real model)."""
-
 from app.models import Appointment, AppointmentStatus
 from sqlalchemy import select
 
@@ -21,7 +19,7 @@ from tests.fakes import ScriptedProvider, call, say
 
 
 def factory(seed, session_factory, replies):
-    config = AgentSettings(_env_file=None)
+    config = AgentSettings(_env_file=None, confirm_changes=False)
 
     def make(phone: str) -> MedNexaAgent:
         return MedNexaAgent(
@@ -50,7 +48,8 @@ async def test_passing_scenario_and_cleanup(seed, session_factory, monkeypatch, 
     )  # fmt: skip
     result, agent = await run_scenario(scenario, factory(seed, session_factory, replies))
     assert result.passed, result.failures
-    assert result.turns[1].agent == "Booked. Your token number is 1."
+    assert result.turns[1].agent.startswith("All set! Your appointment is booked with")
+    assert "Your token number is 1." in result.turns[1].agent
     assert result.turns[1].provider == "scripted"
 
     monkeypatch.setattr("agent.evals.SessionFactory", session_factory)

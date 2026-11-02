@@ -44,7 +44,7 @@ export function ScheduleOverrideDialog({
   const { hospital } = useHospital();
   const today = todayIn(hospital?.timezone);
   const [date, setDate] = React.useState(defaultDate || today);
-  const [isLeave, setIsLeave] = React.useState(true); // true = Leave/Unavailable, false = Custom hours
+  const [isLeave, setIsLeave] = React.useState(true);
   const [startTime, setStartTime] = React.useState("09:00");
   const [endTime, setEndTime] = React.useState("17:00");
   const [reason, setReason] = React.useState("");
@@ -149,7 +149,6 @@ export function ScheduleOverrideDialog({
           </DialogHeader>
 
           <div className="space-y-4 py-3">
-            {/* Target Date */}
             <div className="space-y-1.5">
               <Label htmlFor="override-date" className="text-xs font-semibold flex items-center gap-1.5">
                 <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
@@ -164,7 +163,6 @@ export function ScheduleOverrideDialog({
               />
             </div>
 
-            {/* Override Mode: Leave vs Custom Hours */}
             <div className="space-y-1.5">
               <Label className="text-xs font-semibold">Override Type</Label>
               <div className="grid grid-cols-2 gap-2">
@@ -196,7 +194,6 @@ export function ScheduleOverrideDialog({
               </div>
             </div>
 
-            {/* Custom Hours (if not leave) */}
             {!isLeave && (
               <div className="grid grid-cols-2 gap-3 p-3 bg-muted/30 border border-border rounded-lg">
                 <div className="space-y-1.5">
@@ -227,7 +224,6 @@ export function ScheduleOverrideDialog({
               </div>
             )}
 
-            {/* Reason */}
             <div className="space-y-1.5">
               <Label htmlFor="override-reason" className="text-xs font-semibold">
                 Reason / Note (optional)

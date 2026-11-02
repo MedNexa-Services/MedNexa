@@ -3,12 +3,10 @@ from zoneinfo import ZoneInfo
 
 
 def hospital_now(timezone: str) -> datetime:
-    """Current time as an aware datetime in the hospital's timezone."""
     return datetime.now(ZoneInfo(timezone))
 
 
 def generate_time_slots(start: time, end: time, duration_minutes: int) -> list[time]:
-    """Slot start times in [start, end) where each slot fully fits before `end`."""
     anchor = date(2000, 1, 1)
     cursor = datetime.combine(anchor, start)
     stop = datetime.combine(anchor, end)

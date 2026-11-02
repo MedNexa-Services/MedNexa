@@ -26,11 +26,6 @@ async def list_overrides(
 async def upsert_override(
     db: AsyncSession, doctor_id: uuid.UUID, data: ScheduleOverrideIn
 ) -> Schedule:
-    """Create or replace the override for one date.
-
-    Existing appointments on that date are not changed; staff reschedule them
-    if the new hours exclude them.
-    """
     doctor = await load_doctor(db, doctor_id)
     candidate = Schedule(doctor_id=doctor_id, **data.model_dump())
     if data.is_available and working_window(doctor, data.date, candidate) is None:
@@ -44,7 +39,6 @@ async def upsert_override(
             "start_time": values.excluded.start_time,
             "end_time": values.excluded.end_time,
             "override_reason": values.excluded.override_reason,
-            # ORM onupdate doesn't fire for a Core upsert, so set it explicitly.
             "updated_at": func.now(),
         },
     ).returning(Schedule)

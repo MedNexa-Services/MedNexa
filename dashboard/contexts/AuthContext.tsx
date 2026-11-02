@@ -19,8 +19,6 @@ interface AuthContextType {
 
 const AuthContext = React.createContext<AuthContextType | undefined>(undefined);
 
-// The session lives in an httpOnly cookie set by /api/auth/login and checked on
-// the server (proxy.ts); this context only mirrors who is signed in for the UI.
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = React.useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);

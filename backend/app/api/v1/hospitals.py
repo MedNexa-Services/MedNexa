@@ -48,9 +48,6 @@ async def update_hospital(
     return HospitalOut.model_validate(await hospital_service.update_hospital(db, hospital_id, body))
 
 
-# --- FAQ / info entries -------------------------------------------------------------
-
-
 @router.get("/hospitals/{hospital_id}/info", tags=["hospital info"])
 async def list_info(
     db: DbSession,

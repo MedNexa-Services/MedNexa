@@ -23,9 +23,6 @@ _STOPWORDS = {
 }  # fmt: skip
 
 
-# --- hospitals ----------------------------------------------------------------------
-
-
 async def get_hospital(db: AsyncSession, hospital_id: uuid.UUID) -> Hospital:
     hospital = await db.get(Hospital, hospital_id)
     if hospital is None:
@@ -57,9 +54,6 @@ async def update_hospital(
     await db.commit()
     await db.refresh(hospital)
     return hospital
-
-
-# --- hospital info (FAQ entries) ----------------------------------------------------
 
 
 async def _get_info(db: AsyncSession, info_id: uuid.UUID) -> HospitalInfo:
@@ -119,7 +113,6 @@ def _keywords(text: str) -> set[str]:
 
 
 def _matches(word: str, haystack: set[str]) -> bool:
-    """Exact match, or a shared prefix of 4+ letters ("park" ~ "parking")."""
     if word in haystack:
         return True
     return len(word) >= 4 and any(
@@ -130,11 +123,6 @@ def _matches(word: str, haystack: set[str]) -> bool:
 async def get_hospital_info(
     db: AsyncSession, hospital_id: uuid.UUID, query: str
 ) -> list[HospitalInfoOut]:
-    """Agent lookup: active FAQ entries ranked by keyword overlap with `query`.
-
-    An empty or stopword-only query returns the first entries, so the agent can
-    still answer "what can you tell me about the hospital?".
-    """
     entries = list(
         await db.scalars(
             select(HospitalInfo)

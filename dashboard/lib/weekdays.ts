@@ -1,4 +1,3 @@
-// ISO weekdays (1 = Monday), as the backend stores a doctor's working days.
 export const WEEKDAYS = [
   { day: 1, short: "Mon", long: "Monday" },
   { day: 2, short: "Tue", long: "Tuesday" },
@@ -9,7 +8,6 @@ export const WEEKDAYS = [
   { day: 7, short: "Sun", long: "Sunday" },
 ];
 
-/** [1,2,3,4,5] -> "Mon to Fri"; [2,4,6] -> "Tue, Thu, Sat" */
 export function describeDays(days: number[]): string {
   const sorted = [...days].sort((a, b) => a - b);
   if (sorted.length === 0) return "No working days";

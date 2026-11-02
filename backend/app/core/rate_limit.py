@@ -1,9 +1,3 @@
-"""Failed-login throttling (plan task 5.4 covers rate limiting; this protects sign-in).
-
-In-memory and per process: enough for the single API process this project runs
-today; a multi-worker deployment would need Redis (already in the compose file).
-"""
-
 import time
 from collections import deque
 from collections.abc import Callable
@@ -12,8 +6,6 @@ MAX_TRACKED_KEYS = 10_000
 
 
 class FailedLoginLimiter:
-    """Blocks a key after `max_failures` failed attempts within `window_seconds`."""
-
     def __init__(
         self,
         max_failures: int,
@@ -37,7 +29,6 @@ class FailedLoginLimiter:
         return attempts
 
     def retry_after(self, key: str) -> int:
-        """Seconds until `key` may try again; 0 if it is not blocked."""
         attempts = self._recent(key)
         if len(attempts) < self._max:
             return 0
@@ -47,7 +38,7 @@ class FailedLoginLimiter:
         if len(self._failures) >= MAX_TRACKED_KEYS:
             for stale in [k for k in self._failures if not self._recent(k)]:
                 self._failures.pop(stale, None)
-            if len(self._failures) >= MAX_TRACKED_KEYS:  # still full: drop the oldest key
+            if len(self._failures) >= MAX_TRACKED_KEYS:
                 self._failures.pop(next(iter(self._failures)))
         self._failures.setdefault(key, deque()).append(self._clock())
 

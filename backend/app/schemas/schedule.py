@@ -7,8 +7,6 @@ from app.schemas.common import ORMModel
 
 
 class ScheduleOverrideIn(BaseModel):
-    """Upsert body for one date. Null times fall back to the doctor's template."""
-
     date: date
     is_available: bool = True
     start_time: time | None = None

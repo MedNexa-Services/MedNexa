@@ -8,12 +8,6 @@ from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 
 class Schedule(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """Per-date override of a doctor's weekly template (leave, changed hours).
-
-    No row for a date means the template applies. Null start/end times fall back
-    to the doctor's template times.
-    """
-
     __tablename__ = "schedule"
     __table_args__ = (
         UniqueConstraint("doctor_id", "date"),

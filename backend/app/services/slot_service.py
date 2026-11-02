@@ -1,11 +1,3 @@
-"""Slot availability engine.
-
-A doctor's fields are the weekly template; a `Schedule` row for a date overrides
-it (day off, changed hours). Free slots = template/override grid − BOOKED slots
-− slots that already started (hospital-local time), and nothing once the
-doctor's daily cap is reached.
-"""
-
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
@@ -19,18 +11,15 @@ from app.core.timeutils import add_minutes, generate_time_slots, hospital_now
 from app.models import Appointment, AppointmentStatus, Doctor, Hospital, Schedule
 from app.schemas.slot import DoctorSlotOut, SlotOut
 
-# Days searched by find_next_available, counting the start date.
 NEXT_AVAILABLE_HORIZON_DAYS = 14
 
 
 @dataclass(frozen=True)
 class DayPlan:
-    """Everything needed to decide whether a given time on a date is bookable."""
-
-    grid: list[time]  # every slot start in the working window; empty = not working
-    booked: dict[time, uuid.UUID]  # BOOKED slot start -> patient_id
+    grid: list[time]
+    booked: dict[time, uuid.UUID]
     cap_reached: bool
-    not_before: time | None  # today: slots must start after this; None = no cutoff
+    not_before: time | None
     is_past_date: bool
 
     def is_free(self, at: time) -> bool:
@@ -47,7 +36,6 @@ class DayPlan:
 
 
 def working_window(doctor: Doctor, on: date, override: Schedule | None) -> tuple[time, time] | None:
-    """The doctor's working hours on `on`, or None if they are not working."""
     if override is not None:
         if not override.is_available:
             return None
@@ -66,7 +54,6 @@ def plan_day(
     booked: dict[time, uuid.UUID],
     now: datetime,
 ) -> DayPlan:
-    """Pure computation of a doctor's day. `now` must be in hospital-local time."""
     window = working_window(doctor, on, override)
     grid = generate_time_slots(*window, doctor.slot_duration_minutes) if window else []
     today = now.date()
@@ -95,7 +82,6 @@ def is_bookable_doctor(doctor: Doctor) -> bool:
 async def load_day_plan(
     db: AsyncSession, doctor: Doctor, on: date, now: datetime | None = None
 ) -> DayPlan:
-    """DB-backed `plan_day` for one doctor and date. `doctor.hospital` must be loaded."""
     now = now or hospital_now(doctor.hospital.timezone)
     override = await db.scalar(
         select(Schedule).where(Schedule.doctor_id == doctor.id, Schedule.date == on)
@@ -114,7 +100,6 @@ async def load_day_plan(
 async def get_available_slots(
     db: AsyncSession, doctor_id: uuid.UUID, on: date, *, now: datetime | None = None
 ) -> list[SlotOut]:
-    """Free slots for a doctor on a date. Raises NotFound for an unknown doctor."""
     doctor = await load_doctor(db, doctor_id)
     if not is_bookable_doctor(doctor):
         return []
@@ -132,13 +117,6 @@ async def find_next_available(
     *,
     now: datetime | None = None,
 ) -> list[DoctorSlotOut]:
-    """Earliest free slots across all active doctors matching `speciality`.
-
-    Matches speciality or department, case-insensitively and by substring, since
-    callers say things like "heart doctor" -> "cardio". LIKE wildcards are matched
-    literally and a blank speciality returns nothing. Searches
-    NEXT_AVAILABLE_HORIZON_DAYS days, starting from (and including) the start date.
-    """
     hospital = await db.get(Hospital, hospital_id)
     if hospital is None:
         raise NotFound("Hospital not found")
@@ -147,7 +125,7 @@ async def find_next_available(
         return []
     now = now or hospital_now(hospital.timezone)
     start = max(from_date or now.date(), now.date())
-    end = start + timedelta(days=NEXT_AVAILABLE_HORIZON_DAYS - 1)  # inclusive: 14 days
+    end = start + timedelta(days=NEXT_AVAILABLE_HORIZON_DAYS - 1)
 
     doctors = list(
         await db.scalars(

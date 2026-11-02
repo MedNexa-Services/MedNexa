@@ -126,7 +126,6 @@ export function RescheduleAppointmentDialog({
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          {/* Current Appointment Banner */}
           <div className="p-3 bg-muted/40 rounded-lg border border-border text-xs space-y-1">
             <div className="flex justify-between">
               <span className="text-muted-foreground">Current Schedule:</span>
@@ -154,7 +153,6 @@ export function RescheduleAppointmentDialog({
             />
           </div>
 
-          {/* New Slot Picker */}
           <div className="space-y-2">
             <Label className="text-xs font-semibold flex items-center justify-between">
               <span className="flex items-center gap-1.5">

@@ -35,7 +35,6 @@ interface BookAppointmentDialogProps {
   onOpenChange: (open: boolean) => void;
   defaultDate?: string;
   defaultDoctorId?: string;
-  /** Pre-fills step 2 when booking for a patient who is already registered. */
   defaultPatient?: Pick<PatientOut, "name" | "phone" | "age" | "gender" | "email">;
   onSuccess: () => void;
 }
@@ -50,11 +49,9 @@ export function BookAppointmentDialog({
 }: BookAppointmentDialogProps) {
   const [step, setStep] = React.useState<1 | 2 | 3 | 4>(1);
 
-  // Doctors list
   const [doctors, setDoctors] = React.useState<DoctorOut[]>([]);
   const [loadingDoctors, setLoadingDoctors] = React.useState(false);
 
-  // Step 1: Doctor & Slot selection
   const [selectedDoctorId, setSelectedDoctorId] = React.useState<string>(defaultDoctorId || "");
   const { hospitalId, hospital } = useHospital();
   const today = todayIn(hospital?.timezone);
@@ -63,7 +60,6 @@ export function BookAppointmentDialog({
   const [loadingSlots, setLoadingSlots] = React.useState(false);
   const [selectedSlot, setSelectedSlot] = React.useState<string>("");
 
-  // Step 2: Patient Info
   const [patientName, setPatientName] = React.useState("");
   const [patientPhone, setPatientPhone] = React.useState("+91");
   const [patientAge, setPatientAge] = React.useState<string>("");
@@ -71,11 +67,9 @@ export function BookAppointmentDialog({
   const [patientEmail, setPatientEmail] = React.useState("");
   const [notes, setNotes] = React.useState("");
 
-  // Step 4 / Submission
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [confirmation, setConfirmation] = React.useState<BookingConfirmation | null>(null);
 
-  // Load doctors on dialog open
   React.useEffect(() => {
     if (open) {
       setStep(1);
@@ -113,7 +107,6 @@ export function BookAppointmentDialog({
     }
   }, [open, defaultDate, defaultDoctorId, defaultPatient, hospitalId, today]);
 
-  // Load slots when doctor or date changes
   React.useEffect(() => {
     if (!open || !selectedDoctorId || !selectedDate) return;
 
@@ -147,7 +140,6 @@ export function BookAppointmentDialog({
     return doctors.find((d) => d.id === selectedDoctorId);
   }, [doctors, selectedDoctorId]);
 
-  // Step navigation validations
   const canProceedStep1 = selectedDoctorId && selectedDate && selectedSlot;
   const canProceedStep2 = patientName.trim().length >= 2 && patientPhone.trim().length >= 10;
 
@@ -221,7 +213,6 @@ export function BookAppointmentDialog({
             </div>
           </div>
 
-          {/* Stepper progress indicator */}
           {step <= 3 && (
             <div className="flex items-center justify-between pt-4 pb-1">
               <div
@@ -272,7 +263,6 @@ export function BookAppointmentDialog({
           )}
         </DialogHeader>
 
-        {/* STEP 1: Doctor, Date & Slot */}
         {step === 1 && (
           <div className="space-y-4 py-2">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -315,7 +305,7 @@ export function BookAppointmentDialog({
               <div className="p-3 bg-muted/30 border border-border rounded-lg text-xs flex items-center justify-between">
                 <div>
                   <span className="font-semibold text-foreground">{selectedDoctor.name}</span>
-                  <span className="text-muted-foreground"> — {selectedDoctor.department} ({selectedDoctor.qualification})</span>
+                  <span className="text-muted-foreground"> - {selectedDoctor.department} ({selectedDoctor.qualification})</span>
                 </div>
                 <Badge variant="outline" className="text-[11px]">
                   {selectedDoctor.slot_duration_minutes} min slots
@@ -323,7 +313,6 @@ export function BookAppointmentDialog({
               </div>
             )}
 
-            {/* Slots Grid */}
             <div className="space-y-2 pt-2">
               <Label className="text-xs font-semibold flex items-center justify-between">
                 <span className="flex items-center gap-1.5">
@@ -373,7 +362,6 @@ export function BookAppointmentDialog({
           </div>
         )}
 
-        {/* STEP 2: Patient Info */}
         {step === 2 && (
           <div className="space-y-4 py-2">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -467,7 +455,6 @@ export function BookAppointmentDialog({
           </div>
         )}
 
-        {/* STEP 3: Review & Confirm */}
         {step === 3 && (
           <div className="space-y-4 py-2">
             <Card className="p-4 space-y-3 bg-muted/20 border-border">
@@ -515,7 +502,6 @@ export function BookAppointmentDialog({
           </div>
         )}
 
-        {/* STEP 4: Confirmation Screen */}
         {step === 4 && confirmation && (
           <div className="py-4 text-center space-y-4">
             <div>

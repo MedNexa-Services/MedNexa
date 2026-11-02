@@ -7,8 +7,6 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  /* System fonts: nothing to download at build time (hospital servers are often offline),
-     no third-party font requests from staff browsers, and Devanagari fallbacks for Hindi names. */
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
     "Noto Sans", "Noto Sans Devanagari", "Nirmala UI", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
@@ -56,8 +54,6 @@
 }
 
 :root {
-  /* Front-desk palette: cool paper, one accent (surgical-scrubs green), and colour
-     otherwise reserved for appointment status. */
   --background: #f6f7f5;
   --foreground: #1d2320;
   --card: #ffffff;
@@ -80,7 +76,7 @@
   --status-cancelled: #b42318;
   --status-moved: #9a6700;
   --status-done: #5f6a65;
-  --chart-1: #0a8a6c; /* the brand green, saturated enough for chart marks */
+  --chart-1: #0a8a6c;
   --chart-2: #6ba596;
   --chart-3: #9a6700;
   --chart-4: #b42318;
@@ -145,7 +141,6 @@
     @apply font-sans;
     -webkit-font-smoothing: antialiased;
   }
-  /* Tokens, times and counts line up in columns. */
   table,
   time,
   .tabular {

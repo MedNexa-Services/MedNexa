@@ -1,14 +1,13 @@
-# MedNexa — Part 3: Voice/Telephony Pipeline
+# MedNexa telephony
 
-> **Owner: Team Member 3 (Voice/Telephony Engineer)**
-
-This package implements the full audio pipeline connecting phone calls to the MedNexa AI agent:
+Connects phone calls to the AI receptionist:
 
 ```
-Caller → Twilio WebSocket → VAD → STT → AI Agent (Part 2) → TTS → Caller
+Caller -> Twilio media stream -> VAD -> Whisper -> agent -> TTS -> Caller
 ```
 
----
+The same pipeline also serves a test page at `/call`, where you can talk to the
+receptionist from a browser without a phone line.
 
 ## Directory Structure
 
@@ -17,16 +16,17 @@ telephony/
 ├── telephony/
 │   ├── config.py          # All settings (env-vars prefixed MEDNEXA_TEL_)
 │   ├── logging_setup.py   # structlog JSON logging
-│   ├── api_client.py      # HTTP client → Part 1 backend (call session CRUD)
-│   ├── vad.py             # Silero VAD — speech/silence detection
+│   ├── api_client.py      # backend calls: start, log and end a call
+│   ├── vad.py             # Silero VAD, speech/silence detection
 │   ├── stt.py             # Faster-Whisper STT + language detection
 │   ├── tts.py             # Piper TTS (local) + Edge-TTS (cloud fallback)
 │   ├── audio_utils.py     # Noise suppression, gain normalisation
 │   ├── recording.py       # Call recorder (WAV files + consent prompt)
-│   ├── agent_interface.py # Protocol for Part 2's agent + StubAgent for dev
-│   ├── pipeline.py        # CallPipeline — orchestrates the full call
+│   ├── agent_interface.py # what the pipeline needs from an agent; StubAgent
+│   ├── pipeline.py        # CallPipeline, runs the full call
 │   ├── twilio_handler.py  # Twilio webhook + Media Streams WebSocket
-│   └── main.py            # FastAPI app entry point
+│   ├── call.html          # the /call test page
+│   └── main.py            # FastAPI app: /health, /call, /ws/call, Twilio routes
 └── tests/
     ├── conftest.py
     ├── test_vad.py
@@ -35,9 +35,7 @@ telephony/
     └── test_pipeline.py
 ```
 
----
-
-## Quick Start
+## Running it
 
 ### 1. Install dependencies
 
@@ -51,10 +49,10 @@ uv pip install -e ".[dev]"
 
 ```bash
 cp .env.example .env
-# Edit .env — fill in Twilio credentials, hospital UUID, Piper paths
+# Set the hospital id, and the Twilio credentials and Piper paths if you use them
 ```
 
-### 3. Install Piper TTS (optional — Edge-TTS is the automatic fallback)
+### 3. Install Piper TTS (optional: without it the Edge voices are used)
 
 ```bash
 # Download binary from https://github.com/rhasspy/piper/releases
@@ -70,7 +68,10 @@ mkdir -p models/piper
 uvicorn telephony.main:app --host 0.0.0.0 --port 8001 --reload
 ```
 
-### 5. Expose to Twilio via ngrok
+### 5. Try a call
+
+Open `http://localhost:8001/call` and start a call. For Twilio, expose the server over
+HTTPS:
 
 ```bash
 ngrok http 8001
@@ -79,11 +80,9 @@ ngrok http 8001
 
 ### 6. Configure Twilio
 
-In your Twilio Console → Phone Number → Voice webhook:
+In the Twilio console, set the phone number's voice webhook to:
 - **URL**: `https://your-ngrok-url.ngrok.io/twilio/voice`
 - **Method**: POST
-
----
 
 ## Architecture
 
@@ -111,7 +110,7 @@ Twilio WS  ──μ-law──▶  WS /twilio/stream/{sid}
      │               └────────┬────────┘
      │                        │ TranscriptionResult
      │               ┌────────▼────────┐
-     │               │  AI Agent       │  Part 2's MedNexaAgent
+     │               │  AI Agent       │  agent.MedNexaAgent
      │               └────────┬────────┘
      │                        │ response text
      │               ┌────────▼────────┐
@@ -124,22 +123,57 @@ Twilio WS  ──μ-law──▶  WS /twilio/stream/{sid}
 
 ### Barge-in Detection
 
-When TTS is playing and the VAD detects `speech_start`, a `barge_in_triggered`
-event is set. The TTS streaming loop checks this flag between chunks and stops
-immediately if set. This lets callers interrupt the AI mid-sentence.
+If the caller starts talking while a reply is playing, the reply stops and Twilio drops
+the audio it has queued, so callers can interrupt the receptionist. The /call page
+instead mutes the microphone while the receptionist speaks, because a laptop's
+microphone would otherwise hear the speakers.
+
+While a reply is being worked out, incoming audio is dropped, so background noise isn't
+taken as the caller's next turn. Transcripts that are empty, low-confidence or a typical
+Whisper noise word ("you", "hmm") are ignored instead of answered.
 
 ### Language Detection
 
-- Faster-Whisper reports the detected language on every transcription.
-- Normalised to `"en"` or `"hi"` (any other language → English default).
-- On a language switch, the TTS voice is also switched (Amy → Swara).
+Whisper detects the language of every utterance; the reply is spoken in the same
+language. The /call page fixes the call to English instead.
 
----
+## Keeping a call alive
 
-## Integration with Part 2 (AI Agent)
+A call only ends when the caller hangs up, the agent says goodbye, or its time runs out
+(10 minutes). Everything else is survived:
+
+- **Model errors:** retried; the caller is asked to repeat; only the third failed turn in a
+  row goes to staff (see the agent README).
+- **Voice errors:** each sentence is retried, and sentences already made are remembered, so
+  fixed phrases such as "One moment, please" still play if the voice service can't be reached.
+  If no audio can be made, the call goes on and the /call page speaks the reply with the
+  browser's own voice.
+- **Speech recognition errors** and noise: ignored; two utterances in a row with no words get
+  "Sorry, I didn't catch that".
+- **Slow replies:** "One moment, please" after 4 seconds (`THINKING_FILLER_SECONDS`).
+- **Silence:** "Are you still there?" after 15 seconds, goodbye after 15 more, counted from the
+  end of the last reply.
+- **The last words** finish playing before the line closes.
+- **Busy line:** over `MAX_CONCURRENT_CALLS` (10), callers are told to try again.
+- Calls that are cut off anyway are closed by the backend after 30 minutes.
+
+## Speech and voice
+
+Whisper (`base`, beam size 5) is given the hospital's doctor and department names as a
+prompt, which raised accuracy on a 100-clip test from 93.0% to 96.2%; the `small` model is
+slightly better but 3.6 times slower. The 0.3 s before speech is detected is kept, so the
+first syllable isn't lost.
+
+The voice is made a sentence at a time, in parallel, so a long reply starts after its first
+sentence. The silence the voice service puts around each sentence (about a second) is
+trimmed, and the speed is `EDGE_RATE` (default `+5%`). Text is converted with `ffmpeg`.
+
+The /call page shows what the receptionist heard and said as it happens.
+
+## The agent
 
 The pipeline creates one agent per call with `create_agent()`
-(`telephony/agent_interface.py`): Part 2's `MedNexaAgent` when its package is
+(`telephony/agent_interface.py`): `MedNexaAgent` when its package is
 installed, otherwise the canned `StubAgent` (with a warning in the logs).
 
 ```bash
@@ -165,33 +199,11 @@ async def process(self, text: str, language: str) -> str: ...
 async def get_summary(self) -> str | None: ...
 ```
 
----
-
-## Running Tests
+## Tests
 
 ```bash
 pytest tests/ -v
 ```
 
-Tests use monkeypatching — no real Torch/Whisper/Piper needed.
+Tests use monkeypatching, so no real Torch/Whisper/Piper needed.
 
----
-
-## Deliverables Checklist
-
-| # | Task | Status |
-|---|---|---|
-| 3.1 | Twilio webhook (prototype telephony) | ✅ `twilio_handler.py` |
-| 3.2 | WebSocket audio bridge | ✅ `twilio_handler.py` + `main.py` |
-| 3.3 | Silero VAD | ✅ `vad.py` |
-| 3.4 | Faster-Whisper STT | ✅ `stt.py` |
-| 3.5 | Language detection (en/hi) | ✅ `stt.py` |
-| 3.6 | Piper TTS (Hindi + English voices) | ✅ `tts.py` |
-| 3.7 | Edge-TTS fallback | ✅ `tts.py` |
-| 3.8 | Audio streaming to caller | ✅ `pipeline.py` |
-| 3.9 | Barge-in detection | ✅ `pipeline.py` |
-| 3.10 | Call session management (via Part 1 API) | ✅ `api_client.py` + `pipeline.py` |
-| 3.11 | DTMF fallback | 🔜 Phase 2 (P2) |
-| 3.12 | Noise suppression + gain control | ✅ `audio_utils.py` |
-| 3.13 | Call recording + consent prompt | ✅ `recording.py` |
-| 3.14 | Load testing | 🔜 Phase 2 |

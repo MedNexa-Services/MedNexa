@@ -6,7 +6,7 @@ from app.schemas.hospital import HospitalCreate
 from app.services import hospital_service
 from sqlalchemy import select
 
-from agent.tools import TOOLS, ToolContext, ToolInputError, execute_tool, parse_time
+from agent.tools import TOOLS, ToolContext, ToolInputError, execute_tool, parse_time, says_yes
 from tests.conftest import CALLER, MONDAY, NOW
 
 
@@ -147,7 +147,6 @@ async def test_tools_needing_caller_id_fail_without_it(ctx, seed) -> None:
 
 @pytest.fixture
 async def other_hospital_ctx(ctx, session_factory) -> ToolContext:
-    """A call coming in on a second hospital's line, from the same caller."""
     async with session_factory() as db:
         other = await hospital_service.create_hospital(
             db,
@@ -185,6 +184,62 @@ async def test_transfer_sets_escalation(ctx) -> None:
     result = await execute_tool(ctx, "transfer_to_human", {"reason": "Caller wants billing"})
     assert result["ok"] and ctx.escalation_reason == "Caller wants billing"
     assert ctx.events.outcome() == "ESCALATED"
+
+
+@pytest.mark.parametrize(
+    "said",
+    [
+        "I want to talk to a real person about my bill, please.",
+        "Can you connect me to the staff?",
+        "मुझे किसी इंसान से बात करनी है",
+    ],
+)
+async def test_transfer_is_immediate_when_the_caller_asks_for_a_person(ctx, said) -> None:
+    ctx.confirm_changes = True
+    ctx.last_caller_text = said
+    result = await execute_tool(ctx, "transfer_to_human", {"reason": "Caller asked"})
+    assert result["ok"] and ctx.escalation_reason == "Caller asked"
+
+
+async def test_a_spurious_transfer_asks_the_caller_first(ctx) -> None:
+    ctx.confirm_changes = True
+    ctx.last_caller_text = "Hello, good morning."
+    ctx.turn = 1
+    first = await execute_tool(ctx, "transfer_to_human", {"reason": "greeting only"})
+    assert not first["ok"] and first["error"] == "needs_confirmation"
+    assert first["readback"] == "Would you like me to connect you to one of our staff?"
+    assert ctx.escalation_reason is None
+
+    ctx.readback_spoken, ctx.turn, ctx.last_caller_text = True, 2, "Yes, please."
+    second = await execute_tool(ctx, "transfer_to_human", {"reason": "greeting only"})
+    assert second["ok"] and ctx.escalation_reason == "greeting only"
+
+
+async def test_a_transfer_the_caller_declines_does_not_happen(ctx) -> None:
+    ctx.confirm_changes, ctx.turn = True, 1
+    ctx.last_caller_text = "Hello"
+    await execute_tool(ctx, "transfer_to_human", {"reason": "x"})
+    ctx.readback_spoken, ctx.turn, ctx.last_caller_text = True, 2, "No thanks, I'll manage."
+    result = await execute_tool(ctx, "transfer_to_human", {"reason": "x"})
+    assert not result["ok"] and ctx.escalation_reason is None
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["Yes", "yes please", "Yeah, go ahead.", "Okay", "Sure", "That's correct", "Haan ji",
+     "हाँ, कर दीजिए", "Yes, please confirm.", "The first slot is fine."],
+)  # fmt: skip
+def test_clear_yes(text: str) -> None:
+    assert says_yes(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["No", "No, thanks", "Not really", "Wait a moment", "Yes but make it later", "Actually no",
+     "नहीं", "What?", "Tomorrow morning please", ""],
+)  # fmt: skip
+def test_not_a_clear_yes(text: str) -> None:
+    assert not says_yes(text)
 
 
 @pytest.mark.parametrize(

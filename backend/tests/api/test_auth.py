@@ -68,18 +68,14 @@ async def test_auth_login_invalid_password(client: AsyncClient):
 
 
 async def test_auth_me_with_real_unoverridden_dependency():
-    """Test require_staff dependency directly on an app without overrides."""
     app = create_app()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        # Without token -> 401
         res = await c.get("/api/v1/auth/me")
         assert res.status_code == 401
 
-        # With invalid token -> 401
         res_bad = await c.get("/api/v1/auth/me", headers={"Authorization": "Bearer badtoken"})
         assert res_bad.status_code == 401
 
-        # Login to get valid token
         login_res = await c.post(
             "/api/v1/auth/login",
             json={"email": "admin@hospital.com", "password": "admin123"},
@@ -87,7 +83,6 @@ async def test_auth_me_with_real_unoverridden_dependency():
         assert login_res.status_code == 200
         token = login_res.json()["access_token"]
 
-        # With valid token -> 200
         res_ok = await c.get(
             "/api/v1/auth/me",
             headers={"Authorization": f"Bearer {token}"},
@@ -95,8 +90,6 @@ async def test_auth_me_with_real_unoverridden_dependency():
         assert res_ok.status_code == 200
         assert res_ok.json()["email"] == "admin@hospital.com"
 
-
-# --- everything below runs against the real auth dependencies (no overrides) ----------
 
 from collections.abc import AsyncIterator  # noqa: E402
 
@@ -113,7 +106,6 @@ GOOD = {"email": "admin@hospital.com", "password": "admin123"}
 
 @pytest.fixture
 async def anon(session_factory: async_sessionmaker[AsyncSession]) -> AsyncIterator[AsyncClient]:
-    """A client whose requests go through the real require_staff dependencies."""
     app = create_app()
 
     async def _db() -> AsyncIterator[AsyncSession]:
@@ -140,7 +132,7 @@ async def test_every_protected_route_needs_a_token(anon: AsyncClient) -> None:
         ("POST", "/api/v1/appointments"),
     ]:
         assert (await anon.request(method, path)).status_code == 401, (method, path)
-    assert (await anon.get("/api/v1/health")).status_code == 200  # stays public
+    assert (await anon.get("/api/v1/health")).status_code == 200
 
 
 async def test_staff_token_unlocks_the_api(anon: AsyncClient) -> None:
@@ -154,9 +146,7 @@ async def test_repeated_wrong_passwords_are_throttled(anon: AsyncClient) -> None
         assert (await anon.post(LOGIN, json=wrong)).status_code == 401
     blocked = await anon.post(LOGIN, json=wrong)
     assert blocked.status_code == 429 and int(blocked.headers["Retry-After"]) > 0
-    # even the correct password waits out the lockout for that account...
     assert (await anon.post(LOGIN, json=GOOD)).status_code == 429
-    # ...while other accounts are unaffected
     other = await anon.post(LOGIN, json={"email": "someone@hospital.org", "password": "x"})
     assert other.status_code == 401
 
@@ -183,9 +173,6 @@ async def test_a_server_without_a_signing_secret_accepts_no_token(
     headers = await token_for(anon)
     monkeypatch.setattr(get_settings(), "jwt_secret", "")
     assert (await anon.get("/api/v1/hospitals", headers=headers)).status_code == 503
-
-
-# --- service key (telephony) ---------------------------------------------------------
 
 
 def service_headers() -> dict[str, str]:
@@ -235,9 +222,6 @@ async def test_wrong_or_disabled_service_key_is_rejected(
     ).status_code == 401
 
 
-# --- startup validation -------------------------------------------------------------
-
-
 def test_unusable_auth_configuration_is_listed_in_full() -> None:
     with pytest.raises(RuntimeError) as err:
         Settings(
@@ -250,7 +234,7 @@ def test_unusable_auth_configuration_is_listed_in_full() -> None:
 
 def test_valid_or_disabled_auth_configuration_passes() -> None:
     get_settings().require_auth_config()
-    Settings(_env_file=None, auth_enabled=False).require_auth_config()  # explicit dev mode
+    Settings(_env_file=None, auth_enabled=False).require_auth_config()
 
 
 async def test_server_refuses_to_start_without_a_signing_secret(
@@ -262,13 +246,10 @@ async def test_server_refuses_to_start_without_a_signing_secret(
             pass
 
 
-# --- correlation ids ---------------------------------------------------------------
-
-
 async def test_safe_correlation_id_is_echoed_and_unsafe_one_replaced(anon: AsyncClient) -> None:
     ok = await anon.get("/api/v1/health", headers={"X-Correlation-ID": "req-123.abc_DEF"})
     assert ok.headers["X-Correlation-ID"] == "req-123.abc_DEF"
     for bad in ["x" * 200, "has spaces", "<script>", "a;b"]:
         res = await anon.get("/api/v1/health", headers={"X-Correlation-ID": bad})
         assert res.headers["X-Correlation-ID"] != bad
-        assert len(res.headers["X-Correlation-ID"]) == 36  # a fresh UUID
+        assert len(res.headers["X-Correlation-ID"]) == 36

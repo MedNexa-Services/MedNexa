@@ -20,8 +20,6 @@ class Page(BaseModel, Generic[T]):
 
 
 def reject_explicit_nulls(model: BaseModel, nullable: frozenset[str] = frozenset()) -> None:
-    """For PATCH bodies: an omitted field means "keep", but an explicit null is only
-    allowed for fields whose column is nullable."""
     bad = sorted(
         name
         for name in model.model_fields_set

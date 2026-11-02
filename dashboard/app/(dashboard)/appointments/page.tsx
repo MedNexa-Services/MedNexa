@@ -32,13 +32,12 @@ export default function AppointmentsPage() {
   const { hospitalId, hospital } = useHospital();
   const today = todayIn(hospital?.timezone);
 
-  // null = today (in the hospital's timezone), "" = every date, otherwise a picked date
   const [pickedDate, setPickedDate] = React.useState<string | null>(null);
   const date = pickedDate ?? today;
   const [doctorId, setDoctorId] = React.useState("");
   const [status, setStatus] = React.useState("");
   const [search, setSearch] = React.useState("");
-  const [query, setQuery] = React.useState(""); // `search`, applied after typing pauses
+  const [query, setQuery] = React.useState("");
   const [page, setPage] = React.useState(0);
 
   const [appointments, setAppointments] = React.useState<AppointmentOut[]>([]);

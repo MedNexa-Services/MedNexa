@@ -20,12 +20,8 @@ from app.models.patient import Patient
 
 
 class Appointment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """`appointment_date` / `appointment_time` are hospital-local wall-clock values."""
-
     __tablename__ = "appointment"
     __table_args__ = (
-        # One doctor slot holds one patient. Partial, so cancelled rows don't block
-        # rebooking. This also covers "same patient, same doctor, same time".
         Index(
             "uq_appointment_doctor_slot_booked",
             "doctor_id",
@@ -34,7 +30,6 @@ class Appointment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             unique=True,
             postgresql_where=text("status = 'BOOKED'"),
         ),
-        # Tokens are never reused within a doctor's day, even after cancellation.
         UniqueConstraint("doctor_id", "appointment_date", "token_number"),
         Index("ix_appointment_doctor_date", "doctor_id", "appointment_date"),
         Index("ix_appointment_hospital_date", "hospital_id", "appointment_date"),

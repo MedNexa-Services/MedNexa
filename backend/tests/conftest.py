@@ -1,10 +1,3 @@
-"""Test setup: a real Postgres database (mednexa_test), migrated with Alembic.
-
-Services commit real transactions and the concurrency tests need several
-sessions that see each other's commits, so tests are isolated by truncating
-all tables after each test rather than by rolling back a wrapping transaction.
-"""
-
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -31,7 +24,6 @@ TEST_DB_URL = get_settings().test_database_url
 
 @pytest.fixture(scope="session", autouse=True)
 def migrated_database() -> None:
-    """Rebuild the test schema from migrations once per run (also tests the migration)."""
     cfg = Config(str(BACKEND_DIR / "alembic.ini"))
     cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
     cfg.set_main_option("sqlalchemy.url", TEST_DB_URL)
@@ -67,7 +59,6 @@ async def db(session_factory: async_sessionmaker[AsyncSession]) -> AsyncIterator
 
 @pytest.fixture
 async def client(session_factory: async_sessionmaker[AsyncSession]) -> AsyncIterator[AsyncClient]:
-    """HTTP client against the app, with requests using the test database."""
     app = create_app()
 
     async def _test_db() -> AsyncIterator[AsyncSession]:

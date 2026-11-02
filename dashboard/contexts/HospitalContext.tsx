@@ -8,7 +8,6 @@ interface HospitalContextType {
   hospital: HospitalOut | null;
   hospitalId: string | undefined;
   isLoading: boolean;
-  /** The database has no hospital yet (a fresh install): staff must create one first. */
   needsSetup: boolean;
   error: string | null;
   refreshHospital: () => Promise<void>;
@@ -32,14 +31,11 @@ export function HospitalProvider({ children }: { children: React.ReactNode }) {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to load hospital data";
       setError(msg);
-      // Keep the last hospital actually loaded (if any); never substitute invented data.
     } finally {
       setIsLoading(false);
     }
   }, []);
 
-  // Load once someone is signed in (a request before that is only refused), and forget
-  // the hospital when they sign out.
   const { isAuthenticated } = useAuth();
   React.useEffect(() => {
     if (isAuthenticated) {

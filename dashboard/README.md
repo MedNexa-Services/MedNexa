@@ -1,116 +1,50 @@
-# MedNexa Admin Dashboard 🏥
+# MedNexa dashboard
 
-Modern, high-performance Hospital Administration & AI Telephony Management Platform built with **Next.js 16 (App Router)**, **TypeScript**, **Tailwind CSS**, and **shadcn/ui**.
+The staff side of MedNexa: today's token queues, appointments, doctors and their
+schedules, patients, the answers the receptionist gives callers, call transcripts and
+analytics. Next.js 16 (App Router), TypeScript, Tailwind CSS and Base UI components.
 
-MedNexa empowers hospital staff, doctors, and receptionists to monitor live appointments, manage doctor rosters, configure schedule overrides, inspect AI phone call transcripts, and maintain the AI voice agent's knowledge base.
+## Running it
 
----
-
-## ⚡ Tech Stack
-
-- **Framework**: [Next.js 16](https://nextjs.org/) (App Router with Webpack)
-- **Language**: TypeScript (Strict Mode)
-- **Styling**: Tailwind CSS & Base UI / shadcn/ui
-- **Icons**: [Lucide React](https://lucide.dev/)
-- **Charts & Visualizations**: [Recharts](https://recharts.org/)
-- **Notifications**: [Sonner](https://sonner.emilkowal.ski/)
-- **API Client**: Axios with fully typed OpenAPI TypeScript contracts
-- **Theme**: Light & Dark mode support via `next-themes`
-
----
-
-## 📋 Prerequisites
-
-Before running the dashboard, ensure you have:
-
-1. **Node.js**: v18.17+ or v20+ (`node -v`)
-2. **Package Manager**: npm v9+ or pnpm
-3. **MedNexa FastAPI Backend**: Running on `http://127.0.0.1:8000` (PostgreSQL on port `5434`).
-   - Verify with: `curl http://127.0.0.1:8000/docs`
-
----
-
-## 🚀 Quick Start
-
-### 1. Configure Environment Variables
-
-Copy the example environment configuration into `.env.local`:
+It needs the backend running (see `../backend/README.md`).
 
 ```bash
-cp .env.example .env.local
-```
-
-Then edit `.env.local`:
-```env
-# Where the dashboard server reaches the backend API (server-side only)
-BACKEND_URL=http://localhost:8000
-```
-
-The browser only talks to the dashboard itself: requests to `/api/backend/*` are
-forwarded to `BACKEND_URL/api/v1/*` with the staff token, so staff machines don't need
-to reach the API directly.
-
-### 2. Install Dependencies
-
-```bash
+cp .env.example .env.local     # BACKEND_URL, and TELEPHONY_URL for the phone-line status
 npm install
+npm run dev                    # http://localhost:3000
 ```
 
-### 3. Launch Development Server
+Sign in with the staff account configured on the backend (`MEDNEXA_ADMIN_EMAIL` /
+`MEDNEXA_ADMIN_PASSWORD`). On a fresh install the dashboard first asks for the hospital's
+details, then for its doctors.
+
+## How it talks to the API
+
+The browser only talks to the dashboard. The dashboard server signs in on the browser's
+behalf, keeps the backend's token in an httpOnly cookie, and forwards `/api/backend/*` to
+`BACKEND_URL/api/v1/*` with it, so page JavaScript never sees the token and staff machines
+don't need to reach the API. The cookie is `Secure` by default; if the dashboard is served
+over plain HTTP on a hospital network, set `AUTH_COOKIE_SECURE=false` (HTTPS is better).
+
+## Pages
+
+| Route | What it shows |
+|---|---|
+| `/dashboard` | Today: each doctor's token queue, who is next, open slots |
+| `/appointments` | All appointments, searchable by patient name, phone or token; booking |
+| `/doctors` | Doctors, their weekly hours, leave and changed hours (`/doctors/[id]/schedule`) |
+| `/patients` | Patients and their visit history |
+| `/hospital-info` | Answers the receptionist gives callers (timings, parking, fees, ...) |
+| `/call-logs` | Calls answered by the receptionist, with transcripts and hand-overs to staff |
+| `/analytics` | Busiest days and hours, appointments per doctor, call figures |
+| `/settings` | Hospital details, OPD hours, notes for the receptionist, phone line setup |
+
+## Checks
 
 ```bash
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) in your browser.
-
-Sign in with the staff account configured on the **backend** (`MEDNEXA_ADMIN_EMAIL` /
-`MEDNEXA_ADMIN_PASSWORD`; see `backend/README.md`). The dashboard server signs in on
-the browser's behalf and keeps the backend's JWT in an httpOnly cookie, so the token is
-never visible to page JavaScript. The cookie is `Secure` in production; if the dashboard
-is served over plain HTTP on a hospital LAN, set `AUTH_COOKIE_SECURE=false` (HTTPS is
-strongly preferred).
-
----
-
-## 🧭 Dashboard Navigation & Modules
-
-| Route | Module | Purpose |
-|---|---|---|
-| `/dashboard` | **Home Overview** | Today's appointment counters, real-time consultation feed, and doctors on duty. |
-| `/doctors` | **Doctor Roster** | Manage practitioners, weekly recurring availability, slot limits, and active status. |
-| `/doctors/[id]` | **Doctor Profile** | Edit practitioner qualification, department, bio, and launch schedule manager. |
-| `/doctors/[id]/schedule` | **Schedule Overrides** | Interactive month calendar for date-specific leaves and modified clinic hours. |
-| `/appointments` | **Appointments** | Filterable consultation table by date/doctor/status with 3-step booking wizard. |
-| `/appointments/[id]` | **Appointment Details** | Full audit trail, patient identity, and staff reschedule/cancellation actions. |
-| `/patients` | **Patient Directory** | Phone-normalized patient lookups and demographic profiles. |
-| `/patients/[id]` | **Patient History** | Complete historical timeline of all past and upcoming consultations. |
-| `/hospital-info` | **AI Knowledge Base** | Add, edit, and toggle hospital FAQs used by the AI voice agent. |
-| `/call-logs` | **Telephony Logs** | Real-time call sessions, duration, and human emergency escalation markers. |
-| `/call-logs/[id]` | **Transcript Viewer** | Turn-by-turn dialogue inspection and tool invocation logs. |
-| `/analytics` | **Visual Analytics** | Recharts graphs for weekday volume, status distribution, and peak hours. |
-| `/settings` | **Hospital Profile** | Operating hours, timezone (Asia/Kolkata), and AI multilingual voice settings. |
-
----
-
-## 🐳 Docker Deployment
-
-A multi-stage `Dockerfile` is provided for containerized deployments:
-
-```bash
-# Build production Docker image
-docker build -t mednexa-dashboard:latest .
-
-# Run container on port 3000
-docker run -p 3000:3000 -e BACKEND_URL=http://backend:8000 mednexa-dashboard:latest
-```
-
----
-
-## 🛠️ Verification & Quality Checks
-
-Run the TypeScript typecheck:
-```bash
+npm run lint
+npx tsc --noEmit
 npm run build
 ```
-*Expected: 0 TypeScript errors, all routes compiled cleanly.*
+
+The same checks run in CI (`.github/workflows/dashboard.yml`).

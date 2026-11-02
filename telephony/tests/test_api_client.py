@@ -1,5 +1,3 @@
-"""BackendClient: authentication header and request shape."""
-
 from __future__ import annotations
 
 import httpx

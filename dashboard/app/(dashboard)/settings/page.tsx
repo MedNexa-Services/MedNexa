@@ -52,7 +52,6 @@ export default function SettingsPage() {
   const [saving, setSaving] = React.useState(false);
   const [copied, setCopied] = React.useState(false);
 
-  // The form starts from the saved hospital and again after every save.
   const saved = React.useMemo(() => (hospital ? formFrom(hospital) : null), [hospital]);
   const values = form ?? saved;
   const dirty = form !== null && JSON.stringify(form) !== JSON.stringify(saved);

@@ -1,10 +1,3 @@
-"""What happened during a call, recorded from tool results.
-
-Used for the end-of-call summary, the call outcome reported to the backend, and
-the guardrail that blocks claims ("your appointment is booked") that no tool
-result backs up.
-"""
-
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -30,7 +23,6 @@ class CallEvents:
         return [e for e in self.events if e.kind == kind and e.ok]
 
     def confirmed_tokens(self) -> set[int]:
-        """Token numbers the caller may legitimately be told about."""
         tokens = set()
         for e in self.events:
             if not e.ok:
@@ -46,7 +38,6 @@ class CallEvents:
         return bool(self.succeeded("escalate"))
 
     def outcome(self) -> str:
-        """Backend CallOutcome value for this call."""
         if self.escalated:
             return "ESCALATED"
         outcomes: list[tuple[ActionKind, str]] = [

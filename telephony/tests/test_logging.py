@@ -1,5 +1,3 @@
-"""Phone numbers are masked before anything is written to the logs."""
-
 from __future__ import annotations
 
 import pytest

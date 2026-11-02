@@ -1,8 +1,10 @@
+import json
+
 import pytest
 from langchain_core.messages import HumanMessage
 
 from agent.config import AgentSettings, LLMMode
-from agent.router import ModelRouter, NoProviderAvailable
+from agent.router import ModelRouter, NoProviderAvailable, SpilloverProvider
 from tests.fakes import ScriptedProvider, say
 
 MESSAGES = [HumanMessage("hi")]
@@ -68,7 +70,7 @@ async def test_circuit_breaker_skips_local_then_recovers() -> None:
         await router.ainvoke(MESSAGES)
     assert router.circuit_open
 
-    await router.ainvoke(MESSAGES)  # local skipped while open
+    await router.ainvoke(MESSAGES)
     assert len(local.calls) == 3
 
     clock.now += 61
@@ -131,17 +133,38 @@ def test_build_router_wires_providers_from_settings() -> None:
     from agent.router import build_router
 
     local_only = build_router(settings())
-    assert local_only._local is not None and local_only._cloud is None  # no API key
+    assert local_only._local is not None and local_only._cloud is None
+    assert local_only._local._model.num_ctx == 8192
 
     groq = build_router(settings(groq_api_key="test-key"))
-    assert groq._cloud is not None and groq._cloud.name == "groq:llama-3.3-70b-versatile"
+    assert groq._cloud is not None and groq._cloud.name == "groq:openai/gpt-oss-20b"
+
+    spill = build_router(
+        settings(groq_api_key="test-key", cloud_fallback_models=["openai/gpt-oss-120b"])
+    )
+    assert isinstance(spill._cloud, SpilloverProvider)
 
     openai_only = build_router(
         settings(llm_mode="cloud", cloud_provider="openai", openai_api_key="k", cloud_model="m")
     )
     assert openai_only._local is None and openai_only._cloud.name == "openai:m"
 
-    with pytest.raises(NoProviderAvailable):  # cloud forced but no key configured
+    hosted = build_router(
+        settings(
+            llm_mode="cloud",
+            cloud_provider="openai",
+            openai_api_key="k",
+            openai_base_url="https://api.featherless.ai/v1",
+            cloud_model="openai/gpt-oss-20b",
+            cloud_fallback_models=["openai/gpt-oss-120b"],
+        )
+    )
+    assert isinstance(hosted._cloud, SpilloverProvider)
+    first = hosted._cloud._providers[0]
+    assert first._model.openai_api_base == "https://api.featherless.ai/v1"
+    assert first._model.request_timeout == 10.0
+
+    with pytest.raises(NoProviderAvailable):
         build_router(settings(llm_mode="cloud"))
 
 
@@ -166,3 +189,95 @@ async def test_local_after_cloud_is_not_latency_capped() -> None:
     cloud = ScriptedProvider("cloud", [RuntimeError("cloud down")])
     router = ModelRouter(settings(max_latency_seconds=0.05), local, cloud)
     assert (await router.ainvoke(MESSAGES, language="hi")).content == "local answer"
+
+
+class RateLimited(Exception):
+    status_code = 429
+
+
+class Unavailable(Exception):
+    status_code = 503
+
+
+async def test_rate_limited_model_hands_over_to_the_next_one() -> None:
+    first = ScriptedProvider("groq:a", [RateLimited()])
+    second = ScriptedProvider("groq:b", [say("from b")])
+    router = ModelRouter(settings(llm_mode=LLMMode.CLOUD), None, SpilloverProvider([first, second]))
+    assert (await router.ainvoke(MESSAGES)).content == "from b"
+    assert router.stats.last_provider == "groq:b"
+
+
+async def test_other_errors_are_not_passed_to_the_next_model() -> None:
+    first = ScriptedProvider("groq:a", [ValueError("bad request")])
+    second = ScriptedProvider("groq:b", [say("from b")])
+    router = ModelRouter(settings(llm_mode=LLMMode.CLOUD), None, SpilloverProvider([first, second]))
+    with pytest.raises(NoProviderAvailable):
+        await router.ainvoke(MESSAGES)
+    assert second.calls == []
+
+
+async def test_a_connection_error_is_retried_and_the_call_succeeds() -> None:
+    cloud = ScriptedProvider("cloud", [ConnectionError("dns"), ConnectionError("dns"), say("ok")])
+    router = ModelRouter(settings(llm_retry_delay_seconds=0), None, cloud)
+    assert (await router.ainvoke(MESSAGES)).content == "ok"
+    assert len(cloud.calls) == 3
+
+
+async def test_a_corrupt_reply_from_the_model_host_is_retried() -> None:
+    cloud = ScriptedProvider(
+        "cloud", [json.JSONDecodeError("Expecting ',' delimiter", "{}", 298), say("ok")]
+    )
+    router = ModelRouter(settings(llm_retry_delay_seconds=0), None, cloud)
+    assert (await router.ainvoke(MESSAGES)).content == "ok"
+
+
+class RequestTimeout(Exception): ...
+
+
+async def test_a_stalled_request_is_retried() -> None:
+    cloud = ScriptedProvider("cloud", [RequestTimeout(), say("ok")])
+    router = ModelRouter(settings(llm_retry_delay_seconds=0), None, cloud)
+    assert (await router.ainvoke(MESSAGES)).content == "ok"
+
+
+async def test_retries_are_limited() -> None:
+    cloud = ScriptedProvider("cloud", [ConnectionError("dns")] * 5)
+    router = ModelRouter(settings(llm_retry_delay_seconds=0, llm_retries=2), None, cloud)
+    with pytest.raises(NoProviderAvailable):
+        await router.ainvoke(MESSAGES)
+    assert len(cloud.calls) == 3
+
+
+@pytest.mark.parametrize("error", [Unavailable(), RateLimited()])
+async def test_server_errors_and_rate_limits_are_retried(error: Exception) -> None:
+    cloud = ScriptedProvider("cloud", [error, say("ok")])
+    router = ModelRouter(settings(llm_retry_delay_seconds=0), None, cloud)
+    assert (await router.ainvoke(MESSAGES)).content == "ok"
+
+
+async def test_other_errors_are_not_retried() -> None:
+    cloud = ScriptedProvider("cloud", [ValueError("bad request"), say("ok")])
+    router = ModelRouter(settings(llm_retry_delay_seconds=0), None, cloud)
+    with pytest.raises(NoProviderAvailable):
+        await router.ainvoke(MESSAGES)
+    assert len(cloud.calls) == 1
+
+
+@pytest.mark.parametrize(
+    "error",
+    [ConnectionError("dns"), Unavailable(), json.JSONDecodeError("corrupt", "{}", 3)],
+)
+async def test_a_failing_model_hands_over_to_the_next_one_at_once(error: Exception) -> None:
+    first = ScriptedProvider("groq:a", [error])
+    second = ScriptedProvider("groq:b", [say("from b")])
+    router = ModelRouter(settings(llm_mode=LLMMode.CLOUD), None, SpilloverProvider([first, second]))
+    assert (await router.ainvoke(MESSAGES)).content == "from b"
+    assert router.stats.last_provider == "groq:b"
+
+
+async def test_no_retry_wait_when_another_model_can_answer() -> None:
+    local = ScriptedProvider("local", [ConnectionError("ollama down")])
+    cloud = ScriptedProvider("cloud", [say("from cloud")])
+    router = ModelRouter(settings(llm_retry_delay_seconds=60), local, cloud)
+    assert (await router.ainvoke(MESSAGES)).content == "from cloud"
+    assert len(local.calls) == 1

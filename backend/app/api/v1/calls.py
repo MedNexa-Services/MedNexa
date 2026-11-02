@@ -1,4 +1,4 @@
-"""Call sessions and transcripts: written by Part 3's call pipeline, read by the dashboard."""
+"""Call sessions and transcripts: written by the call pipeline, read by the dashboard."""
 
 import uuid
 from datetime import datetime

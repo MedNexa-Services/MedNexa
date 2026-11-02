@@ -1,7 +1,3 @@
-"""Agent tests run against a real Postgres database migrated with the backend's
-Alembic migrations, with a separate database (mednexa_agent_test) so they can run
-alongside the backend suite."""
-
 import os
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -40,7 +36,6 @@ def next_monday() -> date:
 
 
 MONDAY = next_monday()
-# "Now" for tests: early on the Friday before MONDAY, so MONDAY's slots are all free.
 NOW = datetime.combine(MONDAY - timedelta(days=3), time(8), IST)
 CALLER = "+919876543210"
 

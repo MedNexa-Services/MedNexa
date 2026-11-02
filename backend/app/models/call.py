@@ -25,8 +25,6 @@ class CallSession(UUIDPrimaryKeyMixin, Base):
 
 
 class CallLog(UUIDPrimaryKeyMixin, Base):
-    """One turn of a call: what the caller said, what the agent said, or a tool call."""
-
     __tablename__ = "call_log"
 
     session_id: Mapped[uuid.UUID] = mapped_column(
