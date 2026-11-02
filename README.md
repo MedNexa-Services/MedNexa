@@ -46,6 +46,54 @@ web dashboard.
 
 ## Running it with Docker
 
+### Quick start
+
+```bash
+git clone https://github.com/MedNexa-Services/MedNexa.git
+cd MedNexa
+./setup.sh
+```
+
+Run that once and everything is in place and running. The script:
+
+1. Checks that Docker is installed and running.
+2. Creates `.env` with a random database password, login secret, service key and admin
+   password. An existing `.env` is kept and only its empty values are filled in.
+3. Looks for an NVIDIA GPU and, if there is one, runs the local language model on it.
+4. Builds and starts the database, API and dashboard.
+5. Loads the demo hospital: 8 departments, 11 doctors, leave days and two weeks of bookings.
+6. Links the phone line to that hospital.
+7. Downloads the local language model (`llama3.1:8b`, a few gigabytes, one time only).
+8. Starts the voice service, which downloads its speech models on the first start.
+
+When it finishes it prints the addresses and the sign-in:
+
+| What | Address |
+|---|---|
+| Dashboard | `http://localhost:3001` |
+| Test a call in the browser | `http://localhost:8001/call` |
+| API documentation | `http://localhost:8000/docs` |
+
+What you need: Docker Desktop (or Docker Engine with Compose v2), roughly 15 GB of free disk
+space and 16 GB of memory. The first run downloads a lot and can take a while; later runs are
+quick. On Windows run `./setup.sh` from WSL 2 or Git Bash with Docker Desktop. For the GPU on
+Windows, install a current NVIDIA driver and use Docker Desktop's WSL 2 backend.
+
+Options: `--model NAME` picks another local model, `--cpu` ignores the GPU, `--no-model` skips
+the model download, `--no-seed` skips the demo data and `--no-start` only prepares `.env`.
+Running the script again is safe.
+
+Stop everything with `docker compose down` and start it again with `docker compose up -d`
+(add `-f docker-compose.yml -f docker-compose.gpu.yml` to use the GPU).
+
+Without an NVIDIA GPU, for example on a Mac, the local model runs on the CPU and replies are
+slow. For fast replies add a cloud key to `.env` (see "Choosing the AI model" below) and run
+`docker compose up -d telephony`.
+
+### Manual setup
+
+The steps below are what `setup.sh` does, for anyone who prefers to run them by hand.
+
 ### 1. Prerequisites
 - [Docker](https://docs.docker.com/get-docker/) & [Docker Compose](https://docs.docker.com/compose/) v2+
 - Git
