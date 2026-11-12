@@ -175,6 +175,20 @@ class TestTTSEngine:
         )
         assert done == 2
 
+    @pytest.mark.asyncio
+    async def test_a_prewarmed_greeting_plays_from_the_cache(self) -> None:
+        text = (
+            "Hello! Thank you for calling the prewarm test hospital. "
+            "I'm the AI receptionist. How can I help you today?"
+        )
+        parts = split_sentences(text)
+        edge = edge_returning(*[b"\x00\x40" * 8 for _ in parts])
+        engine = make_engine(edge=edge)
+        assert len(parts) > 1
+        assert await engine.prewarm({"en": [text]}) == len(parts)
+        got = b"".join([chunk async for chunk in engine.stream(text, "en")])
+        assert got and edge.synthesize.await_count == len(parts)
+
 
 class TestDecodeMp3:
     def test_ffmpeg_output_is_returned(self, monkeypatch: pytest.MonkeyPatch) -> None:

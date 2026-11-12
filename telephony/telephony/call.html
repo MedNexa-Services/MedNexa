@@ -112,7 +112,7 @@
 
 <script>
   const STATES = {
-    connecting: ["Connecting", ""],
+    connecting: ["Connecting", "The receptionist is picking up."],
     speaking: ["Receptionist is speaking", "Your microphone is off until it finishes."],
     listening: ["Your turn", "Speak now. Pause when you are done."],
     hearing: ["Listening", "Keep going. Pause when you are done."],
@@ -124,7 +124,7 @@
   const $ = (id) => document.getElementById(id);
   let ws, audioContext, micStream, processor;
   let inCall = false, nextPlayTime = 0, serverThinking = false, shown = "";
-  let browserSpeaking = false, closingMessage = null;
+  let browserSpeaking = false, closingMessage = null, greeted = false, greetTimer = null;
 
   function show(state) {
     if (state === shown) return;
@@ -157,6 +157,7 @@
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = "en-IN";
     browserSpeaking = true;
+    greeted = true;
     utterance.onend = utterance.onerror = () => { browserSpeaking = false; };
     speechSynthesis.speak(utterance);
   }
@@ -174,6 +175,7 @@
     $("lines").replaceChildren();
     $("conversation").hidden = true;
     closingMessage = null;
+    greeted = false;
     $("idle").hidden = true;
     $("live").hidden = false;
     show("connecting");
@@ -186,7 +188,12 @@
       const scheme = location.protocol === "https:" ? "wss:" : "ws:";
       ws = new WebSocket(`${scheme}//${location.host}/ws/call?phone=%2B919876543210&lang=en`);
       ws.binaryType = "arraybuffer";
-      ws.onopen = () => { inCall = true; setLine(true); show("speaking"); startMicrophone(); };
+      ws.onopen = () => {
+        inCall = true;
+        setLine(true);
+        greetTimer = setTimeout(() => { greeted = true; }, 10000);
+        startMicrophone();
+      };
       ws.onmessage = (e) => {
         if (e.data instanceof ArrayBuffer) play(e.data);
         else onServerEvent(JSON.parse(e.data));
@@ -210,14 +217,15 @@
       const playing = nextPlayTime > now || browserSpeaking;
 
 
-      const muted = serverThinking || playing || now < nextPlayTime + ECHO_TAIL;
+      const muted = !greeted || serverThinking || playing || now < nextPlayTime + ECHO_TAIL;
 
       let sum = 0;
       for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
       const level = muted ? 0 : Math.sqrt(sum / input.length);
       $("level").style.width = Math.min(100, level * 600) + "%";
 
-      if (serverThinking && !playing) show("thinking");
+      if (!greeted) show("connecting");
+      else if (serverThinking && !playing) show("thinking");
       else if (muted) show("speaking");
       else show(level > SPEECH_LEVEL ? "hearing" : "listening");
 
@@ -236,6 +244,7 @@
 
   function play(buffer) {
     if (!audioContext) return;
+    greeted = true;
     const samples = new Int16Array(buffer);
     const audio = audioContext.createBuffer(1, samples.length, 16000);
     const channel = audio.getChannelData(0);
@@ -253,6 +262,7 @@
   function endCall(message, letAudioFinish) {
     inCall = false;
     serverThinking = false;
+    clearTimeout(greetTimer);
     if (processor) { processor.disconnect(); processor = null; }
     if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; }
     if (ws) { const socket = ws; ws = null; socket.close(); }

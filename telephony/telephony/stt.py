@@ -146,7 +146,9 @@ class FasterWhisperSTT:
             "beam_size": self._beam_size,
             "vad_filter": self._vad_filter,
             "word_timestamps": False,
+            "without_timestamps": True,
             "condition_on_previous_text": False,
+            "temperature": 0.0,
         }
         if prompt:
             kwargs["initial_prompt"] = prompt

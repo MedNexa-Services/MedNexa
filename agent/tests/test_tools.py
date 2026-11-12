@@ -181,6 +181,7 @@ async def test_tools_only_reach_this_hospitals_appointments(ctx, other_hospital_
 
 
 async def test_transfer_sets_escalation(ctx) -> None:
+    ctx.turn = 3
     result = await execute_tool(ctx, "transfer_to_human", {"reason": "Caller wants billing"})
     assert result["ok"] and ctx.escalation_reason == "Caller wants billing"
     assert ctx.events.outcome() == "ESCALATED"
@@ -201,25 +202,34 @@ async def test_transfer_is_immediate_when_the_caller_asks_for_a_person(ctx, said
     assert result["ok"] and ctx.escalation_reason == "Caller asked"
 
 
-async def test_a_spurious_transfer_asks_the_caller_first(ctx) -> None:
+async def test_a_greeting_is_never_transferred(ctx) -> None:
     ctx.confirm_changes = True
-    ctx.last_caller_text = "Hello, good morning."
+    ctx.last_caller_text = "Hey, good evening."
     ctx.turn = 1
-    first = await execute_tool(ctx, "transfer_to_human", {"reason": "greeting only"})
+    result = await execute_tool(ctx, "transfer_to_human", {"reason": "greeting only"})
+    assert not result["ok"] and result["error"] == "not_requested"
+    assert ctx.readback is None and ctx.escalation_reason is None
+
+
+async def test_a_later_unrequested_transfer_asks_the_caller_first(ctx) -> None:
+    ctx.confirm_changes = True
+    ctx.last_caller_text = "I don't understand the bill they sent me."
+    ctx.turn = 3
+    first = await execute_tool(ctx, "transfer_to_human", {"reason": "billing"})
     assert not first["ok"] and first["error"] == "needs_confirmation"
     assert first["readback"] == "Would you like me to connect you to one of our staff?"
     assert ctx.escalation_reason is None
 
-    ctx.readback_spoken, ctx.turn, ctx.last_caller_text = True, 2, "Yes, please."
-    second = await execute_tool(ctx, "transfer_to_human", {"reason": "greeting only"})
-    assert second["ok"] and ctx.escalation_reason == "greeting only"
+    ctx.readback_spoken, ctx.turn, ctx.last_caller_text = True, 4, "Yes, please."
+    second = await execute_tool(ctx, "transfer_to_human", {"reason": "billing"})
+    assert second["ok"] and ctx.escalation_reason == "billing"
 
 
 async def test_a_transfer_the_caller_declines_does_not_happen(ctx) -> None:
-    ctx.confirm_changes, ctx.turn = True, 1
-    ctx.last_caller_text = "Hello"
+    ctx.confirm_changes, ctx.turn = True, 3
+    ctx.last_caller_text = "I have a question about my bill."
     await execute_tool(ctx, "transfer_to_human", {"reason": "x"})
-    ctx.readback_spoken, ctx.turn, ctx.last_caller_text = True, 2, "No thanks, I'll manage."
+    ctx.readback_spoken, ctx.turn, ctx.last_caller_text = True, 4, "No thanks, I'll manage."
     result = await execute_tool(ctx, "transfer_to_human", {"reason": "x"})
     assert not result["ok"] and ctx.escalation_reason is None
 
