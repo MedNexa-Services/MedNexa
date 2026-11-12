@@ -12,6 +12,9 @@ from telephony.logging_setup import get_logger
 
 log = get_logger("stt")
 
+MAX_NEW_TOKENS = 128
+MAX_COMPRESSION_RATIO = 2.4
+
 SUPPORTED_LANGUAGES = {"en", "hi"}
 DEFAULT_LANGUAGE = "en"
 _LANGUAGE_ALIASES = {"hi": "hi", "ur": "hi", "en": "en"}
@@ -119,7 +122,12 @@ class FasterWhisperSTT:
             language = self._likelier_supported(info)
             segments, info = self._run(samples, language, prompt)
 
-        segments = [s for s in segments if not (s.no_speech_prob > 0.6 and s.avg_logprob < -1.0)]
+        segments = [
+            s
+            for s in segments
+            if not (s.no_speech_prob > 0.6 and s.avg_logprob < -1.0)
+            and s.compression_ratio <= MAX_COMPRESSION_RATIO
+        ]
         text = " ".join(s.text.strip() for s in segments if s.text.strip())
         avg_logprob = sum(s.avg_logprob for s in segments) / len(segments) if segments else -1.0
         confidence = float(min(1.0, max(0.0, 1.0 + avg_logprob)))
@@ -149,6 +157,7 @@ class FasterWhisperSTT:
             "without_timestamps": True,
             "condition_on_previous_text": False,
             "temperature": 0.0,
+            "max_new_tokens": MAX_NEW_TOKENS,
         }
         if prompt:
             kwargs["initial_prompt"] = prompt
