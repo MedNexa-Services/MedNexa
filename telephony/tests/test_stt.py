@@ -51,6 +51,7 @@ class TestTranscribeBytes:
         mock_segment.text = "  Hello, how can I help?  "
         mock_segment.avg_logprob = -0.1
         mock_segment.no_speech_prob = 0.01
+        mock_segment.compression_ratio = 1.2
 
         mock_info = MagicMock()
         mock_info.language = "en"
@@ -142,7 +143,9 @@ class FakeWhisper:
 
     def transcribe(self, samples: object, **kwargs: object) -> tuple[list[MagicMock], MagicMock]:
         self.calls.append(kwargs)
-        segment = MagicMock(text=" text ", avg_logprob=-0.2, no_speech_prob=0.01)
+        segment = MagicMock(
+            text=" text ", avg_logprob=-0.2, no_speech_prob=0.01, compression_ratio=1.2
+        )
         info = MagicMock(duration=1.0, all_language_probs=self.probs)
         info.language = kwargs.get("language") or self.detected
         return [segment], info
@@ -208,7 +211,9 @@ class TestSilenceAndNames:
 
     @staticmethod
     def _segment(text: str, logprob: float, no_speech: float) -> MagicMock:
-        return MagicMock(text=text, avg_logprob=logprob, no_speech_prob=no_speech)
+        return MagicMock(
+            text=text, avg_logprob=logprob, no_speech_prob=no_speech, compression_ratio=1.2
+        )
 
     def test_a_silent_segment_is_dropped(self) -> None:
         stt = self._stt([self._segment("Thanks for watching!", -1.4, 0.9)])
@@ -224,6 +229,18 @@ class TestSilenceAndNames:
         kwargs = stt._model.transcribe.call_args.kwargs
         assert kwargs["initial_prompt"] == "Doctors: Dr. Suresh Patel."
         assert kwargs["condition_on_previous_text"] is False
+
+    def test_a_looping_segment_is_dropped(self) -> None:
+        looping = self._segment("Dr. Suresh Patel, Dr. Suresh Patel, Dr. Suresh Patel,", -0.3, 0.1)
+        looping.compression_ratio = 3.1
+        stt = self._stt([self._segment("I need a doctor.", -0.2, 0.01), looping])
+        assert stt.transcribe_bytes(b"\x01\x00" * 16000).text == "I need a doctor."
+
+    def test_decoding_is_bounded(self) -> None:
+        stt = self._stt([self._segment("hello", -0.2, 0.01)])
+        stt.transcribe_bytes(b"\x01\x00" * 16000)
+        kwargs = stt._model.transcribe.call_args.kwargs
+        assert kwargs["temperature"] == 0.0 and kwargs["max_new_tokens"] == 128
 
     def test_no_prompt_is_not_sent(self) -> None:
         stt = self._stt([self._segment("hello", -0.2, 0.01)])

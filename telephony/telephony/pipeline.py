@@ -126,6 +126,7 @@ class CallPipeline:
         self._barge_in_triggered = asyncio.Event()
         self._call_active = True
         self._busy = False
+        self._ending: asyncio.Task[None] | None = None
         self._unheard = 0
         self._silence_prompted = False
         self._start_time: float = 0.0
@@ -374,7 +375,8 @@ class CallPipeline:
                 if wait > 0:
                     await asyncio.sleep(wait + 0.3)
         finally:
-            await self._end_call()
+            self._ending = asyncio.create_task(self._end_call())
+            await asyncio.shield(self._ending)
 
     async def _end_call(self) -> None:
         try:

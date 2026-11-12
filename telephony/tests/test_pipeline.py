@@ -448,6 +448,37 @@ class TestEndOfCall:
         mock_api.end_call.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_the_call_end_is_sent_from_a_task_that_is_not_being_cancelled(
+        self,
+        mock_vad: MagicMock,
+        mock_stt: MagicMock,
+        mock_tts: MagicMock,
+        mock_api: MagicMock,
+        mock_recorder: MagicMock,
+    ) -> None:
+        import time
+
+        cancelling: list[int] = []
+
+        async def end_call(*args: object, **kwargs: object) -> None:
+            task = asyncio.current_task()
+            cancelling.append(task.cancelling() if task else -1)
+
+        mock_api.end_call.side_effect = end_call
+
+        async def send(chunk: bytes) -> None:
+            pass
+
+        pipeline = CallPipeline("s", "+911", send, agent=StubAgent())
+        pipeline._playback_until = time.monotonic() + 30
+        task = asyncio.create_task(pipeline._finish())
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert cancelling == [0]
+
+    @pytest.mark.asyncio
     async def test_hanging_up_during_the_greeting_still_closes_the_call(
         self,
         mock_vad: MagicMock,
