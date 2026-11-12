@@ -491,10 +491,17 @@ _ASKS_FOR_A_PERSON = re.compile(
 
 
 async def transfer_to_human(ctx: ToolContext, db: AsyncSession, a: TransferArgs) -> dict[str, Any]:
-    if not _ASKS_FOR_A_PERSON.search(ctx.last_caller_text) and ctx.confirmation_needed(
-        ("transfer",), "Would you like me to connect you to one of our staff?"
-    ):
-        return _confirm_first("Would you like me to connect you to one of our staff?")
+    if not _ASKS_FOR_A_PERSON.search(ctx.last_caller_text):
+        if ctx.turn <= 1:
+            return {
+                "ok": False,
+                "error": "not_requested",
+                "message": "The caller has not asked for a person. Greet and help them yourself.",
+            }
+        if ctx.confirmation_needed(
+            ("transfer",), "Would you like me to connect you to one of our staff?"
+        ):
+            return _confirm_first("Would you like me to connect you to one of our staff?")
     ctx.escalation_reason = a.reason
     return {
         "ok": True,
