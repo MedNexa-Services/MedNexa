@@ -245,9 +245,10 @@ class TTSEngine:
         done = 0
         for language, texts in phrases.items():
             for text in texts:
-                try:
-                    await self.speak(text, language)
-                    done += 1
-                except TTSUnavailable:
-                    log.warning("tts_prewarm_failed", text=text[:40])
+                for sentence in split_sentences(text):
+                    try:
+                        await self.speak(sentence, language)
+                        done += 1
+                    except TTSUnavailable:
+                        log.warning("tts_prewarm_failed", text=sentence[:40])
         return done

@@ -28,6 +28,22 @@ log = get_logger("main")
 CALL_PAGE = Path(__file__).with_name("call.html")
 
 
+async def _prewarm_voice(hospital_id: str) -> None:
+    phrases = fixed_phrases()
+    if hospital_id:
+        from telephony.agent_interface import create_agent
+
+        for language, voice in (("en", "en"), (None, "en"), ("hi", "hi")):
+            try:
+                agent = create_agent("", hospital_id)
+                if hasattr(agent, "fixed_language"):
+                    agent.fixed_language = language
+                phrases[voice].insert(0, await agent.get_greeting())
+            except Exception:
+                log.warning("greeting_prewarm_failed", language=language)
+    await TTSEngine().prewarm(phrases)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # type: ignore[type-arg]
     cfg = get_settings()
@@ -36,7 +52,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # type: ignore[type-ar
     log.info("preloading_models")
     SileroVAD._load_model()
     await asyncio.to_thread(FasterWhisperSTT().warm_up)
-    prewarm = asyncio.create_task(TTSEngine().prewarm(fixed_phrases()))
+    prewarm = asyncio.create_task(_prewarm_voice(cfg.hospital_id))
 
     if not cfg.hospital_id:
         log.error(
