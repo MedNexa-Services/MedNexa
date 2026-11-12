@@ -12,8 +12,10 @@ scripts
 docker-compose.yml
 README.md
 
-# local environments and caches
+# local environments and caches (.nosync copies are kept out of iCloud sync)
 **/.venv
+**/*.nosync
+*.nosync
 **/node_modules
 **/__pycache__
 **/*.py[cod]
