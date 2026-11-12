@@ -3,21 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Test call · MedNexa</title>
+<title>Call the receptionist · MedNexa</title>
 <style>
   :root {
     --background: #f6f7f5; --foreground: #1d2320; --card: #ffffff; --muted: #edf0ee;
     --muted-foreground: #5f6a65; --border: #dce1de; --sidebar: #eef1ef;
     --primary: #1e6b5c; --primary-foreground: #ffffff; --destructive: #b42318;
     --status-moved: #9a6700; --status-done: #5f6a65;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --background: #121614; --foreground: #e6eae8; --card: #181d1b; --muted: #222927;
-      --muted-foreground: #98a39e; --border: #2a312e; --sidebar: #161b19;
-      --primary: #5fb39f; --primary-foreground: #0e1f1a; --destructive: #f07a6e;
-      --status-moved: #d9a441; --status-done: #98a39e;
-    }
+    color-scheme: light;
   }
   * { box-sizing: border-box; }
   body {
@@ -78,7 +71,7 @@
   <aside>
     <div>
       <p class="brand">MedNexa</p>
-      <p class="place">Test line</p>
+      <p class="place">Phone line</p>
     </div>
     <div>
       <p class="line"><span class="dot" id="lineDot"></span><span id="lineText">Ready</span></p>
@@ -87,7 +80,7 @@
   </aside>
 
   <main>
-    <h1>Test call</h1>
+    <h1>Call the receptionist</h1>
     <p class="description">Talk to the AI receptionist from this browser, the way a patient would on the phone.</p>
 
     <section class="card">

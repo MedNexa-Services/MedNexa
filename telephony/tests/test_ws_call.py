@@ -148,7 +148,7 @@ async def test_the_test_page_is_served_without_caching(server: str) -> None:
     async with httpx.AsyncClient() as client:
         response = await client.get(page)
     assert response.status_code == 200
-    assert "Test call" in response.text
+    assert "Call the receptionist" in response.text
     assert response.headers["cache-control"] == "no-store"
 
 
