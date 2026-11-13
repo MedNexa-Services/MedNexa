@@ -6,7 +6,15 @@ from app.schemas.hospital import HospitalCreate
 from app.services import hospital_service
 from sqlalchemy import select
 
-from agent.tools import TOOLS, ToolContext, ToolInputError, execute_tool, parse_time, says_yes
+from agent.tools import (
+    TOOLS,
+    ToolContext,
+    ToolInputError,
+    execute_tool,
+    parse_time,
+    says_yes,
+    speciality_key,
+)
 from tests.conftest import CALLER, MONDAY, NOW
 
 
@@ -59,6 +67,35 @@ async def test_info_tools(ctx, seed) -> None:
 
     now = await execute_tool(ctx, "get_current_datetime", {})
     assert now == {"ok": True, "date": NOW.date().isoformat(), "weekday": "Friday", "time": "08:00"}
+
+
+@pytest.mark.parametrize(
+    ("term", "name"),
+    [("Cardiology", "Dr. Anil Sharma"), ("heart", "Dr. Anil Sharma"),
+     ("dermatology", "Dr. Neha Rao"), ("Skin specialist", "Dr. Neha Rao")],
+)  # fmt: skip
+async def test_speciality_names_are_matched_loosely(ctx, seed, term, name) -> None:
+    doctors = await execute_tool(ctx, "list_doctors", {"speciality": term})
+    assert [d["name"] for d in doctors["doctors"]] == [name]
+    nxt = await execute_tool(ctx, "find_next_available", {"speciality": term, "limit": 1})
+    assert nxt["slots"][0]["doctor_name"] == name
+
+
+def test_speciality_key_handles_british_spelling() -> None:
+    assert speciality_key("Orthopaedics") == speciality_key("Orthopedic Surgeon") == "ortho"
+    assert speciality_key("paediatrician") == "pedia"
+    assert speciality_key("ENT") == "ent"
+
+
+async def test_a_doctor_name_works_in_place_of_an_id(ctx, seed) -> None:
+    slots = await execute_tool(
+        ctx, "check_available_slots", {"doctor_id": "Dr. Anil Sharma", "date": MONDAY.isoformat()}
+    )
+    assert slots["ok"] and slots["free_slots"] == ["09:00", "09:30", "10:00", "10:30"]
+    unknown = await execute_tool(
+        ctx, "check_available_slots", {"doctor_id": "Dr. Nobody", "date": MONDAY.isoformat()}
+    )
+    assert unknown["error"] == "invalid_arguments"
 
 
 async def test_booking_uses_caller_phone_and_records_event(ctx, seed, session_factory) -> None:
