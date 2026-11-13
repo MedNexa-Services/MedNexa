@@ -47,7 +47,7 @@ class AgentSettings(BaseSettings):
     temperature: float = 0.2
     handover_after_failures: int = 3
     confirm_changes: bool = True
-    max_tool_rounds: int = 4
+    max_tool_rounds: int = 6
     max_history_messages: int = 40
     max_response_chars: int = 350
 

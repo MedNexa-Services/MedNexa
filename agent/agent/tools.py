@@ -171,8 +171,56 @@ def _appointment(a: AppointmentOut) -> dict[str, Any]:
     }
 
 
+_SPECIALITY_WORDS = {
+    "bone": "ortho", "fracture": "ortho", "joint": "ortho", "heart": "cardi",
+    "skin": "derma", "child": "pedia", "kid": "pedia", "baby": "pedia", "brain": "neuro",
+    "nerve": "neuro", "ear": "ent", "nose": "ent", "throat": "ent", "women": "gyne",
+    "pregnan": "gyne", "obstet": "gyne", "family": "gener", "physician": "gener",
+}  # fmt: skip
+
+
+def _plain(text: str) -> str:
+    return re.sub(r"[^a-z ]", "", text.lower()).replace("ae", "e").strip()
+
+
+def speciality_key(term: str) -> str:
+    words = _plain(term).split()
+    for word in words:
+        for hint, key in _SPECIALITY_WORDS.items():
+            if word.startswith(hint):
+                return key
+    first = words[0] if words else ""
+    return first[:5]
+
+
+def _matches(key: str, *fields: str | None) -> bool:
+    return bool(key) and any(key in _plain(f or "") for f in fields)
+
+
+async def _doctor_by_name(ctx: ToolContext, db: AsyncSession, raw: str) -> uuid.UUID | None:
+    name = re.sub(r"^\s*(dr\.?|doctor)\s+", "", raw.strip(), flags=re.I).strip()
+    if not name:
+        return None
+    rows = (
+        await db.execute(
+            select(Doctor.id, Doctor.name).where(
+                Doctor.hospital_id == ctx.hospital_id, Doctor.is_active
+            )
+        )
+    ).all()
+    wanted = _plain(name)
+    found = [r[0] for r in rows if wanted in _plain(r[1])]
+    return found[0] if len(found) == 1 else None
+
+
 async def _own_doctor(ctx: ToolContext, db: AsyncSession, raw_id: str) -> uuid.UUID:
-    doctor_id = parse_id(raw_id, "doctor")
+    try:
+        doctor_id = parse_id(raw_id, "doctor")
+    except ToolInputError:
+        by_name = await _doctor_by_name(ctx, db, raw_id)
+        if by_name is None:
+            raise
+        return by_name
     hospital_id = await db.scalar(select(Doctor.hospital_id).where(Doctor.id == doctor_id))
     if hospital_id != ctx.hospital_id:
         raise NotFound("Doctor not found")
@@ -264,7 +312,11 @@ async def get_hospital_info(
 
 
 async def list_doctors(ctx: ToolContext, db: AsyncSession, a: ListDoctorsArgs) -> dict[str, Any]:
-    doctors = await contracts.list_doctors(db, ctx.hospital_id, a.speciality, a.department)
+    doctors = await contracts.list_doctors(db, ctx.hospital_id)
+    for term in (a.speciality, a.department):
+        if term and term.strip():
+            key = speciality_key(term)
+            doctors = [d for d in doctors if _matches(key, d.speciality, d.department)]
     return {
         "ok": True,
         "doctors": [
@@ -331,7 +383,7 @@ async def find_next_available(
     start = parse_date(a.preferred_date) if a.preferred_date else None
     now = await ctx.current_time(db)
     slots = await contracts.find_next_available(
-        db, ctx.hospital_id, a.speciality, start, a.limit, now=now
+        db, ctx.hospital_id, speciality_key(a.speciality) or a.speciality, start, a.limit, now=now
     )
     return {
         "ok": True,
